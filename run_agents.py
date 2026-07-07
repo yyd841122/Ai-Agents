@@ -66,6 +66,9 @@ agent_fallback_policies: dict = {}
 # Failure Policy Executor: agent execution records
 agent_execution_records: dict = {}
 
+# Failure Capture: agent failure records
+agent_failure_records: dict = {}
+
 
 def execute_agent_with_policy(
     agent_name: str,
@@ -94,6 +97,18 @@ def execute_agent_with_policy(
         agent_result = call_minimax(role_content, prompt)
     except Exception as e:
         execution_record["execution_status"] = "failed"
+        agent_failure_records[agent_name] = {
+            "provider": model_route["provider"],
+            "model": model_route["model"],
+            "retry_enabled": fallback_policy["retry_enabled"],
+            "max_retries": fallback_policy["max_retries"],
+            "retry_count": execution_record["retry_count"],
+            "upgrade_attempted": execution_record["upgrade_attempted"],
+            "fallback_used": execution_record["fallback_used"],
+            "execution_status": "failed",
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+        }
         raise e
 
     return agent_result, execution_record
@@ -740,6 +755,7 @@ def build_final_report(
     cost_record_status: str,
     fallback_policy_status: str,
     failure_policy_executor_status: str,
+    failure_capture_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -791,6 +807,17 @@ def build_final_report(
     execution_record_header = "| Agent | Provider | Model | Retry Count | Upgrade Attempted | Fallback Used | Execution Status |\n|--------|----------|-------|-------------|-------------------|---------------|------------------|"
     execution_record_section = "\n## Agent Execution Records\n\n" + execution_record_header + "\n" + "\n".join(execution_record_lines) + "\n" if execution_record_lines else ""
 
+    if agent_failure_records:
+        failure_capture_lines = []
+        for agent, record in sorted(agent_failure_records.items()):
+            failure_capture_lines.append(
+                f"| {agent} | {record['provider']} | {record['model']} | {record['retry_count']} | {record['upgrade_attempted']} | {record['fallback_used']} | {record['error_type']} | {record['error_message']} |"
+            )
+        failure_capture_header = "| Agent | Provider | Model | Retry Count | Upgrade Attempted | Fallback Used | Error Type | Error Message |\n|--------|----------|-------|-------------|-------------------|---------------|------------|---------------|"
+        failure_capture_section = "\n## Failure Capture\n\n" + failure_capture_header + "\n" + "\n".join(failure_capture_lines) + "\n"
+    else:
+        failure_capture_section = "\n## Failure Capture\n\n无 Agent 调用失败。\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -821,6 +848,7 @@ def build_final_report(
 - 成本记录：{cost_record_status}
 - 失败降级策略：{fallback_policy_status}
 - 失败策略执行层：{failure_policy_executor_status}
+- 失败捕获：{failure_capture_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -864,6 +892,7 @@ def build_final_report(
 {cost_record_section}
 {fallback_policy_section}
 {execution_record_section}
+{failure_capture_section}
 """
 
 
@@ -949,6 +978,7 @@ def build_run_log(
     cost_record_status: str,
     fallback_policy_status: str,
     failure_policy_executor_status: str,
+    failure_capture_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1011,6 +1041,7 @@ def build_run_log(
 - 成本记录：{cost_record_status}
 - 失败降级策略：{fallback_policy_status}
 - 失败策略执行层：{failure_policy_executor_status}
+- 失败捕获：{failure_capture_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1127,6 +1158,7 @@ def build_summary(
     cost_record_status: str,
     fallback_policy_status: str,
     failure_policy_executor_status: str,
+    failure_capture_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1168,6 +1200,7 @@ def build_summary(
 - 成本记录：{cost_record_status}
 - 失败降级策略：{fallback_policy_status}
 - 失败策略执行层：{failure_policy_executor_status}
+- 失败捕获：{failure_capture_status}
 - Error：{error_text}
 """
 
@@ -1422,6 +1455,7 @@ DELIVERY RESULT:
         cost_record_status = "已记录"
         fallback_policy_status = "已记录"
         failure_policy_executor_status = "已启用"
+        failure_capture_status = "已启用"
 
         final_report = build_final_report(
             task,
@@ -1462,6 +1496,7 @@ DELIVERY RESULT:
             cost_record_status,
             fallback_policy_status,
             failure_policy_executor_status,
+            failure_capture_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1496,6 +1531,7 @@ DELIVERY RESULT:
             cost_record_status,
             fallback_policy_status,
             failure_policy_executor_status,
+            failure_capture_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1530,6 +1566,7 @@ DELIVERY RESULT:
             cost_record_status,
             fallback_policy_status,
             failure_policy_executor_status,
+            failure_capture_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1564,6 +1601,8 @@ DELIVERY RESULT:
         run_log = build_error_run_log(run_dir, error, current_stage)
         save_text(reports_dir / "run_log.md", run_log)
 
+        failure_capture_status = "已启用"
+
         summary = build_summary(
             run_dir,
             "未通过",
@@ -1594,6 +1633,11 @@ DELIVERY RESULT:
             "跳过",
             "跳过",
             "跳过",
+            "跳过",
+            "跳过",
+            "跳过",
+            "跳过",
+            failure_capture_status,
             error,
         )
         save_text(run_dir / "summary.md", summary)
