@@ -231,7 +231,13 @@ def run_planner(
     return call_minimax(planner_role, user_prompt)
 
 
-def run_coder(task: str, product_result: str, planner_result: str) -> str:
+def run_coder(
+    task: str,
+    product_result: str,
+    architect_result: str,
+    test_designer_result: str,
+    planner_result: str,
+) -> str:
     coder_role = read_text(CODER_FILE)
 
     user_prompt = f"""
@@ -243,11 +249,19 @@ def run_coder(task: str, product_result: str, planner_result: str) -> str:
 
 {product_result}
 
+下面是 Architect Agent 生成的 SDD：
+
+{architect_result}
+
+下面是 TestDesigner Agent 生成的 TDD：
+
+{test_designer_result}
+
 下面是 Planner Agent 给出的任务计划：
 
 {planner_result}
 
-请你作为 Coder Agent，根据 PRD 和 Planner 的计划实现代码。
+请你作为 Coder Agent，基于用户原始任务、PRD、SDD、TDD 和 Planner 的计划实现代码。
 """
 
     return call_minimax(coder_role, user_prompt)
@@ -333,6 +347,8 @@ def build_final_report(
     tester_prd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
+    coder_sdd_status: str,
+    coder_tdd_status: str,
     sdd_generated: bool,
     tdd_generated: bool,
 ) -> str:
@@ -350,6 +366,8 @@ def build_final_report(
 - Tester 接收 PRD：{tester_prd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
+- Coder 接收 SDD：{coder_sdd_status}
+- Coder 接收 TDD：{coder_tdd_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 
@@ -449,6 +467,8 @@ def build_run_log(
     tester_prd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
+    coder_sdd_status: str,
+    coder_tdd_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -491,6 +511,8 @@ def build_run_log(
 - Tester 接收 PRD：{tester_prd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
+- Coder 接收 SDD：{coder_sdd_status}
+- Coder 接收 TDD：{coder_tdd_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 
@@ -583,6 +605,8 @@ def build_summary(
     tester_prd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
+    coder_sdd_status: str,
+    coder_tdd_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -596,13 +620,15 @@ def build_summary(
 - Run ID：{run_dir.name}
 - Workflow Result：{workflow_result}
 - PRD：{prd_status}
-- SDD：{s_status if False else sdd_status}
+- SDD：{sdd_status}
 - TDD：{tdd_status}
 - app.html：{artifact_status}
 - Tester：{tester_status}
 - Tester 接收 PRD：{tester_prd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
+- Coder 接收 SDD：{coder_sdd_status}
+- Coder 接收 TDD：{coder_tdd_status}
 - Error：{error_text}
 """
 
@@ -669,9 +695,19 @@ def main():
 
         print("========== Coder 正在根据计划生成代码 ==========")
         current_stage = "Coder"
-        coder_result = remove_think(run_coder(task, product_result, planner_result))
+        coder_result = remove_think(
+            run_coder(
+                task,
+                product_result,
+                architect_result,
+                test_designer_result,
+                planner_result,
+            )
+        )
         print(coder_result)
         save_text(reports_dir / "coder_result.md", coder_result)
+        coder_sdd_status = "已接收"
+        coder_tdd_status = "已接收"
         print()
 
         html_code = extract_html_code(coder_result)
@@ -740,6 +776,8 @@ def main():
             tester_prd_status,
             planner_sdd_status,
             planner_tdd_status,
+            coder_sdd_status,
+            coder_tdd_status,
             sdd_generated,
             tdd_generated,
         )
@@ -756,6 +794,8 @@ def main():
             tester_prd_status,
             planner_sdd_status,
             planner_tdd_status,
+            coder_sdd_status,
+            coder_tdd_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -770,6 +810,8 @@ def main():
             tester_prd_status,
             planner_sdd_status,
             planner_tdd_status,
+            coder_sdd_status,
+            coder_tdd_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -810,6 +852,8 @@ def main():
             False,
             False,
             False,
+            "跳过",
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
