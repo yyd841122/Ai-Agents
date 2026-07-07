@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 PRODUCT_FILE = ROOT / "Product.md"
 ARCHITECT_FILE = ROOT / "Architect.md"
 TEST_DESIGNER_FILE = ROOT / "TestDesigner.md"
+TASK_MANAGER_FILE = ROOT / "TaskManager.md"
 PLANNER_FILE = ROOT / "Planner.md"
 CODER_FILE = ROOT / "Coder.md"
 REVIEWER_FILE = ROOT / "Reviewer.md"
