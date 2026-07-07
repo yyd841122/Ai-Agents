@@ -345,7 +345,24 @@ def run_reviewer(
 
 {coder_result}
 
-请你作为 Reviewer Agent，基于用户原始任务、PRD、SDD、TDD、Planner 计划和 Coder 实现进行代码审查。
+========== REVIEW CONTEXT ==========
+
+PRD:
+{product_result}
+
+SDD:
+{architect_result}
+
+TDD:
+{test_designer_result}
+
+TASK SCOPE:
+{planner_result}
+
+CODER OUTPUT:
+{coder_result}
+
+请你作为 Reviewer Agent，基于用户原始任务、PRD、SDD、TDD、Planner 计划和 Coder 实现进行代码审查。Reviewer 必须基于完整上下文进行代码审查，不仅检查代码结果，还需要验证实现是否符合需求、架构和测试设计。
 """
 
     return call_minimax(reviewer_role, user_prompt)
@@ -419,6 +436,7 @@ def build_final_report(
     coder_scope_status: str,
     reviewer_sdd_status: str,
     reviewer_tdd_status: str,
+    reviewer_context_status: str,
     sdd_generated: bool,
     tdd_generated: bool,
     tasks_generated: bool,
@@ -446,6 +464,7 @@ def build_final_report(
 - Coder 接收执行范围：{coder_scope_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
+- Reviewer 接收审查上下文：{reviewer_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -559,6 +578,7 @@ def build_run_log(
     coder_scope_status: str,
     reviewer_sdd_status: str,
     reviewer_tdd_status: str,
+    reviewer_context_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -610,6 +630,7 @@ def build_run_log(
 - Coder 接收执行范围：{coder_scope_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
+- Reviewer 接收审查上下文：{reviewer_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -715,6 +736,7 @@ def build_summary(
     coder_scope_status: str,
     reviewer_sdd_status: str,
     reviewer_tdd_status: str,
+    reviewer_context_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -745,6 +767,7 @@ def build_summary(
 - Coder 接收执行范围：{coder_scope_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
+- Reviewer 接收审查上下文：{reviewer_context_status}
 - Error：{error_text}
 """
 
@@ -865,6 +888,7 @@ def main():
         save_text(reports_dir / "reviewer_result.md", reviewer_result)
         reviewer_sdd_status = "已接收"
         reviewer_tdd_status = "已接收"
+        reviewer_context_status = "已接收"
         print()
 
         tester_result = "Reviewer 未通过，Tester 已跳过。"
@@ -931,6 +955,7 @@ def main():
             coder_scope_status,
             reviewer_sdd_status,
             reviewer_tdd_status,
+            reviewer_context_status,
             sdd_generated,
             tdd_generated,
             tasks_generated,
@@ -957,6 +982,7 @@ def main():
             coder_scope_status,
             reviewer_sdd_status,
             reviewer_tdd_status,
+            reviewer_context_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -980,6 +1006,7 @@ def main():
             coder_scope_status,
             reviewer_sdd_status,
             reviewer_tdd_status,
+            reviewer_context_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1023,6 +1050,7 @@ def main():
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
