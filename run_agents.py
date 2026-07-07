@@ -27,6 +27,7 @@ WORKFLOW_STAGES = [
     "Product",
     "Architect",
     "TestDesigner",
+    "TaskManager",
     "Planner",
     "Coder",
     "Reviewer",
@@ -597,7 +598,9 @@ def build_run_log(
 - {run_dir / "docs" / "PRD.md"}
 - {run_dir / "docs" / "SDD.md"}
 - {run_dir / "docs" / "TDD.md"}
+- {run_dir / "docs" / "TASKS.md"}
 - {run_dir / "reports" / "product_result.md"}
+- {run_dir / "reports" / "task_manager_result.md"}
 - {run_dir / "reports" / "architect_result.md"}
 - {run_dir / "reports" / "test_designer_result.md"}
 - {run_dir / "reports" / "planner_result.md"}
@@ -751,6 +754,17 @@ def main():
         save_text(reports_dir / "test_designer_result.md", test_designer_result)
         save_text(docs_dir / "TDD.md", test_designer_result)
         tdd_generated = True
+        print()
+
+        print("========== TaskManager 正在生成任务拆分 ==========")
+        current_stage = "TaskManager"
+        task_manager_result = remove_think(
+            run_task_manager(task, product_result, architect_result, test_designer_result)
+        )
+        print(task_manager_result)
+        save_text(reports_dir / "task_manager_result.md", task_manager_result)
+        save_text(docs_dir / "TASKS.md", task_manager_result)
+        tasks_generated = True
         print()
 
         print("========== Planner 正在生成计划 ==========")
@@ -929,7 +943,9 @@ def main():
         print("已生成：docs/PRD.md")
         print("已生成：docs/SDD.md")
         print("已生成：docs/TDD.md")
+        print("已生成：docs/TASKS.md")
         print("已生成：reports/test_designer_result.md")
+        print("已生成：reports/task_manager_result.md")
         print("已生成：reports/final_report.md")
         print("已生成：reports/run_log.md")
 
