@@ -238,6 +238,7 @@ def run_planner(
     product_result: str,
     architect_result: str,
     test_designer_result: str,
+    task_manager_result: str,
 ) -> str:
     planner_role = read_text(PLANNER_FILE)
 
@@ -258,7 +259,11 @@ def run_planner(
 
 {test_designer_result}
 
-请你作为 Planner Agent，基于用户原始任务、PRD、SDD 和 TDD，按你的固定输出格式生成任务计划。
+下面是 TaskManager Agent 生成的 TASKS：
+
+{task_manager_result}
+
+请你作为 Planner Agent，基于用户原始任务、PRD、SDD、TDD 和 TASKS，按你的固定输出格式生成任务计划。
 """
 
     return call_minimax(planner_role, user_prompt)
@@ -403,6 +408,7 @@ def build_final_report(
     tester_tdd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
+    planner_tasks_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
     reviewer_sdd_status: str,
@@ -428,6 +434,7 @@ def build_final_report(
 - Tester 接收 TDD：{tester_tdd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
+- Planner 接收 TASKS：{planner_tasks_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
@@ -539,6 +546,7 @@ def build_run_log(
     tester_tdd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
+    planner_tasks_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
     reviewer_sdd_status: str,
@@ -588,6 +596,7 @@ def build_run_log(
 - Tester 接收 TDD：{tester_tdd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
+- Planner 接收 TASKS：{planner_tasks_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
@@ -691,6 +700,7 @@ def build_summary(
     tester_tdd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
+    planner_tasks_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
     reviewer_sdd_status: str,
@@ -719,6 +729,7 @@ def build_summary(
 - Tester 接收 TDD：{tester_tdd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
+- Planner 接收 TASKS：{planner_tasks_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
@@ -790,12 +801,14 @@ def main():
                 product_result,
                 architect_result,
                 test_designer_result,
+                task_manager_result,
             )
         )
         print(planner_result)
         save_text(reports_dir / "planner_result.md", planner_result)
         planner_sdd_status = "已接收"
         planner_tdd_status = "已接收"
+        planner_tasks_status = "已接收"
         print()
 
         print("========== Coder 正在根据计划生成代码 ==========")
@@ -898,6 +911,7 @@ def main():
             tester_tdd_status,
             planner_sdd_status,
             planner_tdd_status,
+            planner_tasks_status,
             coder_sdd_status,
             coder_tdd_status,
             reviewer_sdd_status,
@@ -922,6 +936,7 @@ def main():
             tester_tdd_status,
             planner_sdd_status,
             planner_tdd_status,
+            planner_tasks_status,
             coder_sdd_status,
             coder_tdd_status,
             reviewer_sdd_status,
@@ -943,6 +958,7 @@ def main():
             tester_tdd_status,
             planner_sdd_status,
             planner_tdd_status,
+            planner_tasks_status,
             coder_sdd_status,
             coder_tdd_status,
             reviewer_sdd_status,
