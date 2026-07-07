@@ -463,6 +463,8 @@ def build_final_report(
     tasks_generated: bool,
     revise_context_status: str,
     revise_context: str,
+    delivery_context_status: str,
+    delivery_context: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -471,6 +473,12 @@ def build_final_report(
     revise_section = ""
     if revise_context_status == "已生成":
         revise_section = f"\n## Revise Context\n\nReviewer 未通过，已生成修订上下文。下一轮 Coder 应基于 Reviewer Output 修复问题。\n"
+
+    delivery_section = ""
+    if delivery_context_status == "已生成":
+        delivery_section = "\n## Delivery Context\n\n本次任务已完成需求、架构、测试设计、任务规划、开发、审查和测试链路，可进入最终交付。\n"
+    elif delivery_context_status == "等待修订":
+        delivery_section = "\n## Delivery Context\n\nReviewer 未通过，当前交付上下文等待修订后生成。\n"
 
     return f"""# Final Report
 
@@ -494,9 +502,10 @@ def build_final_report(
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - Reviewer 接收审查上下文：{reviewer_context_status}
 - 修订上下文：{revise_context_status}
+- 交付上下文：{delivery_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
-- TASKS：{tasks_status}{revise_section}
+- TASKS：{tasks_status}{revise_section}{delivery_section}
 
 ## User Task
 
@@ -610,6 +619,7 @@ def build_run_log(
     reviewer_tdd_status: str,
     reviewer_context_status: str,
     revise_context_status: str,
+    delivery_context_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -664,6 +674,7 @@ def build_run_log(
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - Reviewer 接收审查上下文：{reviewer_context_status}
 - 修订上下文：{revise_context_status}
+- 交付上下文：{delivery_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -772,6 +783,7 @@ def build_summary(
     reviewer_tdd_status: str,
     reviewer_context_status: str,
     revise_context_status: str,
+    delivery_context_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -805,6 +817,7 @@ def build_summary(
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - Reviewer 接收审查上下文：{reviewer_context_status}
 - 修订上下文：{revise_context_status}
+- 交付上下文：{delivery_context_status}
 - Error：{error_text}
 """
 
@@ -989,6 +1002,47 @@ Coder 下一轮必须基于 Reviewer Output 修复问题，并保持 PRD、SDD�
             revise_context_status = "无需修订"
             revise_context = ""
 
+        if tester_status == "完成":
+            delivery_context_status = "已生成"
+            delivery_context = f"""========== DELIVERY CONTEXT ==========
+
+USER TASK:
+{task}
+
+PRD:
+{product_result}
+
+SDD:
+{architect_result}
+
+TDD:
+{test_designer_result}
+
+TASKS:
+{task_manager_result}
+
+TASK SCOPE:
+{planner_result}
+
+CODER OUTPUT:
+{coder_result}
+
+REVIEWER OUTPUT:
+{reviewer_result}
+
+TESTER OUTPUT:
+{tester_result}
+
+DELIVERY RESULT:
+本次任务已完成开发、审查和测试，可进入交付总结。
+"""
+        elif revise_context_status == "已生成":
+            delivery_context_status = "等待修订"
+            delivery_context = ""
+        else:
+            delivery_context_status = "跳过"
+            delivery_context = ""
+
         workflow_passed = (
             reviewer_is_passed
             and tester_status == "完成"
@@ -1029,6 +1083,8 @@ Coder 下一轮必须基于 Reviewer Output 修复问题，并保持 PRD、SDD�
             tasks_generated,
             revise_context_status,
             revise_context,
+            delivery_context_status,
+            delivery_context,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1055,6 +1111,7 @@ Coder 下一轮必须基于 Reviewer Output 修复问题，并保持 PRD、SDD�
             reviewer_tdd_status,
             reviewer_context_status,
             revise_context_status,
+            delivery_context_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1081,6 +1138,7 @@ Coder 下一轮必须基于 Reviewer Output 修复问题，并保持 PRD、SDD�
             reviewer_tdd_status,
             reviewer_context_status,
             revise_context_status,
+            delivery_context_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1124,6 +1182,7 @@ Coder 下一轮必须基于 Reviewer Output 修复问题，并保持 PRD、SDD�
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
