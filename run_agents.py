@@ -60,6 +60,88 @@ agent_model_routes: dict = {}
 # Model Router: agent cost records
 agent_cost_records: dict = {}
 
+# Fallback Policy: agent fallback policy records
+agent_fallback_policies: dict = {}
+
+
+def select_fallback_policy(agent_name: str, model_route: dict) -> dict:
+    """
+    Fallback Policy v1: select fallback policy for agent by role.
+    Returns dict with retry_enabled, max_retries, upgrade_on_failure, fallback_model, policy_reason.
+    """
+    fallback_policies = {
+        "Product": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 仅记录策略，不自动升级；需求、架构、测试设计失败时应显式停止并人工检查",
+        },
+        "Architect": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 仅记录策略，不自动升级；需求、架构、测试设计失败时应显式停止并人工检查",
+        },
+        "TestDesigner": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 仅记录策略，不自动升级；需求、架构、测试设计失败时应显式停止并人工检查",
+        },
+        "TaskManager": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 仅记录策略，不自动重试；任务拆解失败应先检查上下文",
+        },
+        "Planner": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 仅记录策略，不自动重试；任务拆解失败应先检查上下文",
+        },
+        "Coder": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 不自动重写代码，避免隐藏实现错误",
+        },
+        "Reviewer": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 不自动覆盖审查和测试结论，保持结果可解释",
+        },
+        "Tester": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 不自动覆盖审查和测试结论，保持结果可解释",
+        },
+        "Documenter": {
+            "retry_enabled": False,
+            "max_retries": 0,
+            "upgrade_on_failure": False,
+            "fallback_model": "not_enabled",
+            "policy_reason": "v1 不自动重试交付总结，避免生成虚假交付内容",
+        },
+    }
+    return fallback_policies.get(agent_name, {
+        "retry_enabled": False,
+        "max_retries": 0,
+        "upgrade_on_failure": False,
+        "fallback_model": "not_enabled",
+        "policy_reason": "默认策略",
+    })
+
 
 def select_model_for_agent(agent_name: str) -> dict:
     """
@@ -167,6 +249,10 @@ def call_agent(agent_name: str, prompt: str) -> str:
         "estimated_cost": "not_tracked",
         "token_usage": "not_tracked",
     }
+
+    # Record fallback policy (not applied in v1)
+    fallback_policy = select_fallback_policy(agent_name, model_route)
+    agent_fallback_policies[agent_name] = fallback_policy
 
     role_file_map = {
         "Product": PRODUCT_FILE,
@@ -610,6 +696,7 @@ def build_final_report(
     agent_call_wrapper_status: str,
     model_router_status: str,
     cost_record_status: str,
+    fallback_policy_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -645,6 +732,14 @@ def build_final_report(
     cost_record_header = "| Agent | Provider | Model | Cost Tier | Token Usage | Estimated Cost |\n|--------|----------|-------|-----------|--------------|-----------------|"
     cost_record_section = "\n## Cost Record\n\n" + cost_record_header + "\n" + "\n".join(cost_record_lines) + "\n" if cost_record_lines else ""
 
+    fallback_policy_lines = []
+    for agent, policy in sorted(agent_fallback_policies.items()):
+        fallback_policy_lines.append(
+            f"| {agent} | {policy['retry_enabled']} | {policy['max_retries']} | {policy['upgrade_on_failure']} | {policy['fallback_model']} | {policy['policy_reason']} |"
+        )
+    fallback_policy_header = "| Agent | Retry Enabled | Max Retries | Upgrade On Failure | Fallback Model | Policy Reason |\n|--------|--------------|-------------|-------------------|----------------|---------------|"
+    fallback_policy_section = "\n## Fallback Policy\n\n" + fallback_policy_header + "\n" + "\n".join(fallback_policy_lines) + "\n" if fallback_policy_lines else ""
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -672,6 +767,8 @@ def build_final_report(
 - Documenter 接收交付上下文：{documenter_context_status}
 - Agent 调用统一入口：{agent_call_wrapper_status}
 - Model Router：{model_router_status}
+- 成本记录：{cost_record_status}
+- 失败降级策略：{fallback_policy_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -713,6 +810,7 @@ def build_final_report(
 {tester_result.strip()}
 {model_router_section}
 {cost_record_section}
+{fallback_policy_section}
 """
 
 
@@ -796,6 +894,7 @@ def build_run_log(
     agent_call_wrapper_status: str,
     model_router_status: str,
     cost_record_status: str,
+    fallback_policy_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -856,6 +955,7 @@ def build_run_log(
 - Agent 调用统一入口：{agent_call_wrapper_status}
 - Model Router：{model_router_status}
 - 成本记录：{cost_record_status}
+- 失败降级策略：{fallback_policy_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -970,6 +1070,7 @@ def build_summary(
     agent_call_wrapper_status: str,
     model_router_status: str,
     cost_record_status: str,
+    fallback_policy_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1009,6 +1110,7 @@ def build_summary(
 - Agent 调用统一入口：{agent_call_wrapper_status}
 - Model Router：{model_router_status}
 - 成本记录：{cost_record_status}
+- 失败降级策略：{fallback_policy_status}
 - Error：{error_text}
 """
 
@@ -1261,6 +1363,7 @@ DELIVERY RESULT:
         agent_call_wrapper_status = "已启用"
         model_router_status = "已启用"
         cost_record_status = "已记录"
+        fallback_policy_status = "已记录"
 
         final_report = build_final_report(
             task,
@@ -1299,6 +1402,7 @@ DELIVERY RESULT:
             agent_call_wrapper_status,
             model_router_status,
             cost_record_status,
+            fallback_policy_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1331,6 +1435,7 @@ DELIVERY RESULT:
             agent_call_wrapper_status,
             model_router_status,
             cost_record_status,
+            fallback_policy_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1363,6 +1468,7 @@ DELIVERY RESULT:
             agent_call_wrapper_status,
             model_router_status,
             cost_record_status,
+            fallback_policy_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1406,6 +1512,7 @@ DELIVERY RESULT:
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
