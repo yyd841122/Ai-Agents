@@ -311,6 +311,8 @@ def run_reviewer(
 def run_tester(
     task: str,
     product_result: str,
+    architect_result: str,
+    test_designer_result: str,
     planner_result: str,
     coder_result: str,
     reviewer_result: str,
@@ -326,6 +328,14 @@ def run_tester(
 
 {product_result}
 
+下面是 Architect Agent 生成的 SDD：
+
+{architect_result}
+
+下面是 TestDesigner Agent 生成的 TDD：
+
+{test_designer_result}
+
 下面是 Planner Agent 给出的任务计划：
 
 {planner_result}
@@ -338,7 +348,7 @@ def run_tester(
 
 {reviewer_result}
 
-请你作为 Tester Agent，根据用户任务、PRD、Planner 计划、Coder 实现和 Reviewer 结论，按你的固定输出格式设计最小测试方案并给出测试结论。
+请你作为 Tester Agent，根据用户任务、PRD、SDD、TDD、Planner 计划、Coder 实现和 Reviewer 结论，按你的固定输出格式设计最小测试方案并给出测试结论。
 """
 
     return call_minimax(tester_role, user_prompt)
@@ -355,6 +365,8 @@ def build_final_report(
     tester_result: str,
     workflow_result: str,
     tester_prd_status: str,
+    tester_sdd_status: str,
+    tester_tdd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
     coder_sdd_status: str,
@@ -376,6 +388,8 @@ def build_final_report(
 ## Agent Input Evidence
 
 - Tester 接收 PRD：{tester_prd_status}
+- Tester 接收 SDD：{tester_sdd_status}
+- Tester 接收 TDD：{tester_tdd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
 - Coder 接收 SDD：{coder_sdd_status}
@@ -479,6 +493,8 @@ def build_run_log(
     sdd_generated: bool,
     tdd_generated: bool,
     tester_prd_status: str,
+    tester_sdd_status: str,
+    tester_tdd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
     coder_sdd_status: str,
@@ -525,6 +541,8 @@ def build_run_log(
 ## Agent Input Evidence
 
 - Tester 接收 PRD：{tester_prd_status}
+- Tester 接收 SDD：{tester_sdd_status}
+- Tester 接收 TDD：{tester_tdd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
 - Coder 接收 SDD：{coder_sdd_status}
@@ -621,6 +639,8 @@ def build_summary(
     sdd_generated: bool,
     tdd_generated: bool,
     tester_prd_status: str,
+    tester_sdd_status: str,
+    tester_tdd_status: str,
     planner_sdd_status: str,
     planner_tdd_status: str,
     coder_sdd_status: str,
@@ -645,6 +665,8 @@ def build_summary(
 - app.html：{artifact_status}
 - Tester：{tester_status}
 - Tester 接收 PRD：{tester_prd_status}
+- Tester 接收 SDD：{tester_sdd_status}
+- Tester 接收 TDD：{tester_tdd_status}
 - Planner 接收 SDD：{planner_sdd_status}
 - Planner 接收 TDD：{planner_tdd_status}
 - Coder 接收 SDD：{coder_sdd_status}
@@ -768,6 +790,8 @@ def main():
                 run_tester(
                     task,
                     product_result,
+                    architect_result,
+                    test_designer_result,
                     planner_result,
                     coder_result,
                     reviewer_result,
@@ -783,6 +807,8 @@ def main():
         print()
 
         tester_prd_status = "已接收" if tester_status == "完成" else "跳过"
+        tester_sdd_status = "已接收" if tester_status == "完成" else "跳过"
+        tester_tdd_status = "已接收" if tester_status == "完成" else "跳过"
 
         workflow_passed = (
             reviewer_is_passed
@@ -805,6 +831,8 @@ def main():
             tester_result,
             workflow_result,
             tester_prd_status,
+            tester_sdd_status,
+            tester_tdd_status,
             planner_sdd_status,
             planner_tdd_status,
             coder_sdd_status,
@@ -825,6 +853,8 @@ def main():
             sdd_generated,
             tdd_generated,
             tester_prd_status,
+            tester_sdd_status,
+            tester_tdd_status,
             planner_sdd_status,
             planner_tdd_status,
             coder_sdd_status,
@@ -843,6 +873,8 @@ def main():
             sdd_generated,
             tdd_generated,
             tester_prd_status,
+            tester_sdd_status,
+            tester_tdd_status,
             planner_sdd_status,
             planner_tdd_status,
             coder_sdd_status,
@@ -889,6 +921,7 @@ def main():
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
