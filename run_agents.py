@@ -54,11 +54,78 @@ def save_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+# Model Router: agent model routing records
+agent_model_routes: dict = {}
+
+
+def select_model_for_agent(agent_name: str) -> dict:
+    """
+    Model Router v1: select model for agent by role.
+    Returns dict with provider, model, reason.
+    """
+    model_routes = {
+        "Product": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "需求分析需要稳定通用模型",
+        },
+        "Architect": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "架构设计需要较强推理与结构化输出",
+        },
+        "TestDesigner": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "测试设计需要结构化输出能力",
+        },
+        "TaskManager": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "任务拆解需要稳定规划能力",
+        },
+        "Planner": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "任务规划需要稳定规划能力",
+        },
+        "Coder": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "当前开发能力先保持一致模型",
+        },
+        "Reviewer": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "代码审查需要稳定判断能力",
+        },
+        "Tester": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "测试验证需要稳定判断能力",
+        },
+        "Documenter": {
+            "provider": "minimax",
+            "model": "default",
+            "reason": "交付总结使用默认模型即可",
+        },
+    }
+    return model_routes.get(agent_name, {
+        "provider": "minimax",
+        "model": "default",
+        "reason": "默认模型路由",
+    })
+
+
 def call_agent(agent_name: str, prompt: str) -> str:
     """
     统一 Agent 模型调用入口。
-    C-43: Model Router will select model by agent_name here.
+    C-43: Model Router selects model by agent_name here.
     """
+    # Model Router: select model for agent
+    model_route = select_model_for_agent(agent_name)
+    agent_model_routes[agent_name] = model_route
+
     role_file_map = {
         "Product": PRODUCT_FILE,
         "Architect": ARCHITECT_FILE,
@@ -499,6 +566,7 @@ def build_final_report(
     documenter_context_status: str,
     documenter_result: str,
     agent_call_wrapper_status: str,
+    model_router_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -517,6 +585,11 @@ def build_final_report(
     documenter_section = ""
     if documenter_status == "完成":
         documenter_section = f"\n## Documenter Output\n\n{documenter_result.strip()}\n"
+
+    model_router_lines = []
+    for agent, route in sorted(agent_model_routes.items()):
+        model_router_lines.append(f"- {agent}: {route['provider']} / {route['model']}")
+    model_router_section = "\n## Model Router\n\n" + "\n".join(model_router_lines) + "\n" if model_router_lines else ""
 
     return f"""# Final Report
 
@@ -544,6 +617,7 @@ def build_final_report(
 - Documenter：{documenter_status}
 - Documenter 接收交付上下文：{documenter_context_status}
 - Agent 调用统一入口：{agent_call_wrapper_status}
+- Model Router：{model_router_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -583,6 +657,7 @@ def build_final_report(
 ## Tester Result
 
 {tester_result.strip()}
+{model_router_section}
 """
 
 
@@ -664,6 +739,7 @@ def build_run_log(
     documenter_status: str,
     documenter_context_status: str,
     agent_call_wrapper_status: str,
+    model_router_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -722,6 +798,7 @@ def build_run_log(
 - Documenter：{documenter_status}
 - Documenter 接收交付上下文：{documenter_context_status}
 - Agent 调用统一入口：{agent_call_wrapper_status}
+- Model Router：{model_router_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -834,6 +911,7 @@ def build_summary(
     documenter_status: str,
     documenter_context_status: str,
     agent_call_wrapper_status: str,
+    model_router_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -871,6 +949,7 @@ def build_summary(
 - Documenter：{documenter_status}
 - Documenter 接收交付上下文：{documenter_context_status}
 - Agent 调用统一入口：{agent_call_wrapper_status}
+- Model Router：{model_router_status}
 - Error：{error_text}
 """
 
@@ -1121,6 +1200,7 @@ DELIVERY RESULT:
         workflow_result = "通过" if workflow_passed else "未通过"
 
         agent_call_wrapper_status = "已启用"
+        model_router_status = "已启用"
 
         final_report = build_final_report(
             task,
@@ -1157,6 +1237,7 @@ DELIVERY RESULT:
             documenter_context_status,
             documenter_result,
             agent_call_wrapper_status,
+            model_router_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1187,6 +1268,7 @@ DELIVERY RESULT:
             documenter_status,
             documenter_context_status,
             agent_call_wrapper_status,
+            model_router_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1217,6 +1299,7 @@ DELIVERY RESULT:
             documenter_status,
             documenter_context_status,
             agent_call_wrapper_status,
+            model_router_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1260,6 +1343,7 @@ DELIVERY RESULT:
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
