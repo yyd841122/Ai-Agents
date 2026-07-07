@@ -275,6 +275,7 @@ def run_coder(
     architect_result: str,
     test_designer_result: str,
     planner_result: str,
+    current_task_scope: str,
 ) -> str:
     coder_role = read_text(CODER_FILE)
 
@@ -299,7 +300,11 @@ def run_coder(
 
 {planner_result}
 
-请你作为 Coder Agent，基于用户原始任务、PRD、SDD、TDD 和 Planner 的计划实现代码。
+下面是当前执行任务范围：
+
+{current_task_scope}
+
+请你作为 Coder Agent，严格按照 Planner 指定范围实现代码。
 """
 
     return call_minimax(coder_role, user_prompt)
@@ -411,6 +416,7 @@ def build_final_report(
     planner_tasks_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
+    coder_scope_status: str,
     reviewer_sdd_status: str,
     reviewer_tdd_status: str,
     sdd_generated: bool,
@@ -437,6 +443,7 @@ def build_final_report(
 - Planner 接收 TASKS：{planner_tasks_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
+- Coder 接收执行范围：{coder_scope_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - SDD：{sdd_status}
@@ -549,6 +556,7 @@ def build_run_log(
     planner_tasks_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
+    coder_scope_status: str,
     reviewer_sdd_status: str,
     reviewer_tdd_status: str,
 ) -> str:
@@ -599,6 +607,7 @@ def build_run_log(
 - Planner 接收 TASKS：{planner_tasks_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
+- Coder 接收执行范围：{coder_scope_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - SDD：{sdd_status}
@@ -703,6 +712,7 @@ def build_summary(
     planner_tasks_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
+    coder_scope_status: str,
     reviewer_sdd_status: str,
     reviewer_tdd_status: str,
     error: Exception | None = None,
@@ -732,6 +742,7 @@ def build_summary(
 - Planner 接收 TASKS：{planner_tasks_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
+- Coder 接收执行范围：{coder_scope_status}
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - Error：{error_text}
@@ -813,6 +824,7 @@ def main():
 
         print("========== Coder 正在根据计划生成代码 ==========")
         current_stage = "Coder"
+        current_task_scope = planner_result
         coder_result = remove_think(
             run_coder(
                 task,
@@ -820,12 +832,14 @@ def main():
                 architect_result,
                 test_designer_result,
                 planner_result,
+                current_task_scope,
             )
         )
         print(coder_result)
         save_text(reports_dir / "coder_result.md", coder_result)
         coder_sdd_status = "已接收"
         coder_tdd_status = "已接收"
+        coder_scope_status = "已接收"
         print()
 
         html_code = extract_html_code(coder_result)
@@ -914,6 +928,7 @@ def main():
             planner_tasks_status,
             coder_sdd_status,
             coder_tdd_status,
+            coder_scope_status,
             reviewer_sdd_status,
             reviewer_tdd_status,
             sdd_generated,
@@ -939,6 +954,7 @@ def main():
             planner_tasks_status,
             coder_sdd_status,
             coder_tdd_status,
+            coder_scope_status,
             reviewer_sdd_status,
             reviewer_tdd_status,
         )
@@ -961,6 +977,7 @@ def main():
             planner_tasks_status,
             coder_sdd_status,
             coder_tdd_status,
+            coder_scope_status,
             reviewer_sdd_status,
             reviewer_tdd_status,
         )
@@ -1006,6 +1023,7 @@ def main():
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
