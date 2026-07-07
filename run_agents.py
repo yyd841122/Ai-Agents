@@ -270,6 +270,8 @@ def run_coder(
 def run_reviewer(
     task: str,
     product_result: str,
+    architect_result: str,
+    test_designer_result: str,
     planner_result: str,
     coder_result: str,
 ) -> str:
@@ -284,6 +286,14 @@ def run_reviewer(
 
 {product_result}
 
+下面是 Architect Agent 生成的 SDD：
+
+{architect_result}
+
+下面是 TestDesigner Agent 生成的 TDD：
+
+{test_designer_result}
+
 下面是 Planner Agent 给出的任务计划：
 
 {planner_result}
@@ -292,7 +302,7 @@ def run_reviewer(
 
 {coder_result}
 
-请你作为 Reviewer Agent，根据用户任务、PRD、Planner 计划和 Coder 实现进行代码审查。
+请你作为 Reviewer Agent，基于用户原始任务、PRD、SDD、TDD、Planner 计划和 Coder 实现进行代码审查。
 """
 
     return call_minimax(reviewer_role, user_prompt)
@@ -349,6 +359,8 @@ def build_final_report(
     planner_tdd_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
+    reviewer_sdd_status: str,
+    reviewer_tdd_status: str,
     sdd_generated: bool,
     tdd_generated: bool,
 ) -> str:
@@ -368,6 +380,8 @@ def build_final_report(
 - Planner 接收 TDD：{planner_tdd_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
+- Reviewer 接收 SDD：{reviewer_sdd_status}
+- Reviewer 接收 TDD：{reviewer_tdd_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 
@@ -469,6 +483,8 @@ def build_run_log(
     planner_tdd_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
+    reviewer_sdd_status: str,
+    reviewer_tdd_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -513,6 +529,8 @@ def build_run_log(
 - Planner 接收 TDD：{planner_tdd_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
+- Reviewer 接收 SDD：{reviewer_sdd_status}
+- Reviewer 接收 TDD：{reviewer_tdd_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 
@@ -607,6 +625,8 @@ def build_summary(
     planner_tdd_status: str,
     coder_sdd_status: str,
     coder_tdd_status: str,
+    reviewer_sdd_status: str,
+    reviewer_tdd_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -629,6 +649,8 @@ def build_summary(
 - Planner 接收 TDD：{planner_tdd_status}
 - Coder 接收 SDD：{coder_sdd_status}
 - Coder 接收 TDD：{coder_tdd_status}
+- Reviewer 接收 SDD：{reviewer_sdd_status}
+- Reviewer 接收 TDD：{reviewer_tdd_status}
 - Error：{error_text}
 """
 
@@ -720,10 +742,19 @@ def main():
         print("========== Reviewer 正在审查代码 ==========")
         current_stage = "Reviewer"
         reviewer_result = remove_think(
-            run_reviewer(task, product_result, planner_result, coder_result)
+            run_reviewer(
+                task,
+                product_result,
+                architect_result,
+                test_designer_result,
+                planner_result,
+                coder_result,
+            )
         )
         print(reviewer_result)
         save_text(reports_dir / "reviewer_result.md", reviewer_result)
+        reviewer_sdd_status = "已接收"
+        reviewer_tdd_status = "已接收"
         print()
 
         tester_result = "Reviewer 未通过，Tester 已跳过。"
@@ -778,6 +809,8 @@ def main():
             planner_tdd_status,
             coder_sdd_status,
             coder_tdd_status,
+            reviewer_sdd_status,
+            reviewer_tdd_status,
             sdd_generated,
             tdd_generated,
         )
@@ -796,6 +829,8 @@ def main():
             planner_tdd_status,
             coder_sdd_status,
             coder_tdd_status,
+            reviewer_sdd_status,
+            reviewer_tdd_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -812,6 +847,8 @@ def main():
             planner_tdd_status,
             coder_sdd_status,
             coder_tdd_status,
+            reviewer_sdd_status,
+            reviewer_tdd_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -852,6 +889,8 @@ def main():
             False,
             False,
             False,
+            "跳过",
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
