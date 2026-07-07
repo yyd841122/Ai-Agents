@@ -392,6 +392,7 @@ def build_final_report(
     product_result: str,
     architect_result: str,
     test_designer_result: str,
+    task_manager_result: str,
     planner_result: str,
     coder_result: str,
     reviewer_result: str,
@@ -408,9 +409,11 @@ def build_final_report(
     reviewer_tdd_status: str,
     sdd_generated: bool,
     tdd_generated: bool,
+    tasks_generated: bool,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
+    tasks_status = "已生成" if tasks_generated else "未生成"
 
     return f"""# Final Report
 
@@ -431,6 +434,7 @@ def build_final_report(
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
+- TASKS：{tasks_status}
 
 ## User Task
 
@@ -447,6 +451,10 @@ def build_final_report(
 ## TestDesigner Result
 
 {test_designer_result.strip()}
+
+## TaskManager Result
+
+{task_manager_result.strip()}
 
 ## Planner Result
 
@@ -525,6 +533,7 @@ def build_run_log(
     prd_generated: bool,
     sdd_generated: bool,
     tdd_generated: bool,
+    tasks_generated: bool,
     tester_prd_status: str,
     tester_sdd_status: str,
     tester_tdd_status: str,
@@ -540,6 +549,7 @@ def build_run_log(
     prd_status = "已生成" if prd_generated else "未生成"
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
+    tasks_status = "已生成" if tasks_generated else "未生成"
 
     return f"""# Run Log
 
@@ -584,12 +594,14 @@ def build_run_log(
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
+- TASKS：{tasks_status}
 
 ## Artifacts
 
 - PRD：{prd_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
+- TASKS：{tasks_status}
 - app.html：{artifact_status}
 
 ## Output Files
@@ -673,6 +685,7 @@ def build_summary(
     prd_generated: bool,
     sdd_generated: bool,
     tdd_generated: bool,
+    tasks_generated: bool,
     tester_prd_status: str,
     tester_sdd_status: str,
     tester_tdd_status: str,
@@ -688,6 +701,7 @@ def build_summary(
     prd_status = "已生成" if prd_generated else "未生成"
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
+    tasks_status = "已生成" if tasks_generated else "未生成"
     error_text = str(error) if error else "无"
 
     return f"""# Run Summary
@@ -697,6 +711,7 @@ def build_summary(
 - PRD：{prd_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
+- TASKS：{tasks_status}
 - app.html：{artifact_status}
 - Tester：{tester_status}
 - Tester 接收 PRD：{tester_prd_status}
@@ -863,6 +878,7 @@ def main():
             and prd_generated
             and sdd_generated
             and tdd_generated
+            and tasks_generated
         )
         workflow_result = "通过" if workflow_passed else "未通过"
 
@@ -871,6 +887,7 @@ def main():
             product_result,
             architect_result,
             test_designer_result,
+            task_manager_result,
             planner_result,
             coder_result,
             reviewer_result,
@@ -887,6 +904,7 @@ def main():
             reviewer_tdd_status,
             sdd_generated,
             tdd_generated,
+            tasks_generated,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -898,6 +916,7 @@ def main():
             prd_generated,
             sdd_generated,
             tdd_generated,
+            tasks_generated,
             tester_prd_status,
             tester_sdd_status,
             tester_tdd_status,
@@ -918,6 +937,7 @@ def main():
             prd_generated,
             sdd_generated,
             tdd_generated,
+            tasks_generated,
             tester_prd_status,
             tester_sdd_status,
             tester_tdd_status,
@@ -966,6 +986,7 @@ def main():
             "未通过",
             False,
             "跳过",
+            False,
             False,
             False,
             False,
