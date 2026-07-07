@@ -434,6 +434,32 @@ REVIEWER OUTPUT:
     return call_minimax(tester_role, user_prompt)
 
 
+DOCUMENTER_FILE = Path("Documenter.md")
+
+
+def run_documenter(delivery_context: str) -> str:
+    documenter_role = read_text(DOCUMENTER_FILE)
+
+    user_prompt = f"""
+下面是用户原始任务：
+
+========== DELIVERY CONTEXT ==========
+
+{delivery_context}
+
+请你作为 Documenter Agent，基于 Delivery Context 输出最终交付说明，必须包含：
+- 本次任务目标
+- 已完成内容
+- 验证结果
+- 是否可交付
+- 后续建议
+
+Documenter 只能基于 Delivery Context 总结，不得虚构未发生的实现、测试或提交。
+"""
+
+    return call_minimax(documenter_role, user_prompt)
+
+
 def build_final_report(
     task: str,
     product_result: str,
@@ -465,6 +491,9 @@ def build_final_report(
     revise_context: str,
     delivery_context_status: str,
     delivery_context: str,
+    documenter_status: str,
+    documenter_context_status: str,
+    documenter_result: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -479,6 +508,10 @@ def build_final_report(
         delivery_section = "\n## Delivery Context\n\n本次任务已完成需求、架构、测试设计、任务规划、开发、审查和测试链路，可进入最终交付。\n"
     elif delivery_context_status == "等待修订":
         delivery_section = "\n## Delivery Context\n\nReviewer 未通过，当前交付上下文等待修订后生成。\n"
+
+    documenter_section = ""
+    if documenter_status == "完成":
+        documenter_section = f"\n## Documenter Output\n\n{documenter_result.strip()}\n"
 
     return f"""# Final Report
 
@@ -503,9 +536,11 @@ def build_final_report(
 - Reviewer 接收审查上下文：{reviewer_context_status}
 - 修订上下文：{revise_context_status}
 - 交付上下文：{delivery_context_status}
+- Documenter：{documenter_status}
+- Documenter 接收交付上下文：{documenter_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
-- TASKS：{tasks_status}{revise_section}{delivery_section}
+- TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
 
 ## User Task
 
@@ -620,6 +655,8 @@ def build_run_log(
     reviewer_context_status: str,
     revise_context_status: str,
     delivery_context_status: str,
+    documenter_status: str,
+    documenter_context_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -675,6 +712,8 @@ def build_run_log(
 - Reviewer 接收审查上下文：{reviewer_context_status}
 - 修订上下文：{revise_context_status}
 - 交付上下文：{delivery_context_status}
+- Documenter：{documenter_status}
+- Documenter 接收交付上下文：{documenter_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -784,6 +823,8 @@ def build_summary(
     reviewer_context_status: str,
     revise_context_status: str,
     delivery_context_status: str,
+    documenter_status: str,
+    documenter_context_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -818,6 +859,8 @@ def build_summary(
 - Reviewer 接收审查上下文：{reviewer_context_status}
 - 修订上下文：{revise_context_status}
 - 交付上下文：{delivery_context_status}
+- Documenter：{documenter_status}
+- Documenter 接收交付上下文：{documenter_context_status}
 - Error：{error_text}
 """
 
@@ -1043,6 +1086,19 @@ DELIVERY RESULT:
             delivery_context_status = "跳过"
             delivery_context = ""
 
+        if delivery_context_status == "已生成":
+            documenter_status = "完成"
+            documenter_context_status = "已接收"
+            documenter_result = remove_think(run_documenter(delivery_context))
+        elif delivery_context_status == "等待修订":
+            documenter_status = "跳过"
+            documenter_context_status = "等待修订"
+            documenter_result = ""
+        else:
+            documenter_status = "跳过"
+            documenter_context_status = "跳过"
+            documenter_result = ""
+
         workflow_passed = (
             reviewer_is_passed
             and tester_status == "完成"
@@ -1085,6 +1141,9 @@ DELIVERY RESULT:
             revise_context,
             delivery_context_status,
             delivery_context,
+            documenter_status,
+            documenter_context_status,
+            documenter_result,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1112,6 +1171,8 @@ DELIVERY RESULT:
             reviewer_context_status,
             revise_context_status,
             delivery_context_status,
+            documenter_status,
+            documenter_context_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1139,6 +1200,8 @@ DELIVERY RESULT:
             reviewer_context_status,
             revise_context_status,
             delivery_context_status,
+            documenter_status,
+            documenter_context_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1182,6 +1245,8 @@ DELIVERY RESULT:
             False,
             False,
             False,
+            "跳过",
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
