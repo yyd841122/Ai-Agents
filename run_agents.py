@@ -63,6 +63,41 @@ agent_cost_records: dict = {}
 # Fallback Policy: agent fallback policy records
 agent_fallback_policies: dict = {}
 
+# Failure Policy Executor: agent execution records
+agent_execution_records: dict = {}
+
+
+def execute_agent_with_policy(
+    agent_name: str,
+    role_content: str,
+    prompt: str,
+    model_route: dict,
+    fallback_policy: dict,
+) -> tuple[str, dict]:
+    """
+    Failure Policy Executor v1: execute agent call with policy tracking.
+    Returns (agent_result, execution_record).
+    v1 only calls call_minimax once without retry loop.
+    """
+    execution_record = {
+        "attempted_provider": model_route["provider"],
+        "attempted_model": model_route["model"],
+        "retry_enabled": fallback_policy["retry_enabled"],
+        "max_retries": fallback_policy["max_retries"],
+        "retry_count": 0,
+        "upgrade_attempted": False,
+        "fallback_used": False,
+        "execution_status": "completed",
+    }
+
+    try:
+        agent_result = call_minimax(role_content, prompt)
+    except Exception as e:
+        execution_record["execution_status"] = "failed"
+        raise e
+
+    return agent_result, execution_record
+
 
 def select_fallback_policy(agent_name: str, model_route: dict) -> dict:
     """
@@ -270,7 +305,14 @@ def call_agent(agent_name: str, prompt: str) -> str:
         raise ValueError(f"Unknown agent: {agent_name}")
 
     role_content = read_text(role_file_map[agent_name])
-    return call_minimax(role_content, prompt)
+
+    # Execute with policy tracking
+    agent_result, execution_record = execute_agent_with_policy(
+        agent_name, role_content, prompt, model_route, fallback_policy
+    )
+    agent_execution_records[agent_name] = execution_record
+
+    return agent_result
 
 
 def call_minimax(system_prompt: str, user_prompt: str) -> str:
@@ -697,6 +739,7 @@ def build_final_report(
     model_router_status: str,
     cost_record_status: str,
     fallback_policy_status: str,
+    failure_policy_executor_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -740,6 +783,14 @@ def build_final_report(
     fallback_policy_header = "| Agent | Retry Enabled | Max Retries | Upgrade On Failure | Fallback Model | Policy Reason |\n|--------|--------------|-------------|-------------------|----------------|---------------|"
     fallback_policy_section = "\n## Fallback Policy\n\n" + fallback_policy_header + "\n" + "\n".join(fallback_policy_lines) + "\n" if fallback_policy_lines else ""
 
+    execution_record_lines = []
+    for agent, record in sorted(agent_execution_records.items()):
+        execution_record_lines.append(
+            f"| {agent} | {record['attempted_provider']} | {record['attempted_model']} | {record['retry_count']} | {record['upgrade_attempted']} | {record['fallback_used']} | {record['execution_status']} |"
+        )
+    execution_record_header = "| Agent | Provider | Model | Retry Count | Upgrade Attempted | Fallback Used | Execution Status |\n|--------|----------|-------|-------------|-------------------|---------------|------------------|"
+    execution_record_section = "\n## Agent Execution Records\n\n" + execution_record_header + "\n" + "\n".join(execution_record_lines) + "\n" if execution_record_lines else ""
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -769,6 +820,7 @@ def build_final_report(
 - Model Router：{model_router_status}
 - 成本记录：{cost_record_status}
 - 失败降级策略：{fallback_policy_status}
+- 失败策略执行层：{failure_policy_executor_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -811,6 +863,7 @@ def build_final_report(
 {model_router_section}
 {cost_record_section}
 {fallback_policy_section}
+{execution_record_section}
 """
 
 
@@ -895,6 +948,7 @@ def build_run_log(
     model_router_status: str,
     cost_record_status: str,
     fallback_policy_status: str,
+    failure_policy_executor_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -956,6 +1010,7 @@ def build_run_log(
 - Model Router：{model_router_status}
 - 成本记录：{cost_record_status}
 - 失败降级策略：{fallback_policy_status}
+- 失败策略执行层：{failure_policy_executor_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1071,6 +1126,7 @@ def build_summary(
     model_router_status: str,
     cost_record_status: str,
     fallback_policy_status: str,
+    failure_policy_executor_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1111,6 +1167,7 @@ def build_summary(
 - Model Router：{model_router_status}
 - 成本记录：{cost_record_status}
 - 失败降级策略：{fallback_policy_status}
+- 失败策略执行层：{failure_policy_executor_status}
 - Error：{error_text}
 """
 
@@ -1364,6 +1421,7 @@ DELIVERY RESULT:
         model_router_status = "已启用"
         cost_record_status = "已记录"
         fallback_policy_status = "已记录"
+        failure_policy_executor_status = "已启用"
 
         final_report = build_final_report(
             task,
@@ -1403,6 +1461,7 @@ DELIVERY RESULT:
             model_router_status,
             cost_record_status,
             fallback_policy_status,
+            failure_policy_executor_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1436,6 +1495,7 @@ DELIVERY RESULT:
             model_router_status,
             cost_record_status,
             fallback_policy_status,
+            failure_policy_executor_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1469,6 +1529,7 @@ DELIVERY RESULT:
             model_router_status,
             cost_record_status,
             fallback_policy_status,
+            failure_policy_executor_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1512,6 +1573,7 @@ DELIVERY RESULT:
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
