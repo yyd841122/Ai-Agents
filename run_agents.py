@@ -57,63 +57,96 @@ def save_text(path: Path, content: str) -> None:
 # Model Router: agent model routing records
 agent_model_routes: dict = {}
 
+# Model Router: agent cost records
+agent_cost_records: dict = {}
+
 
 def select_model_for_agent(agent_name: str) -> dict:
     """
     Model Router v1: select model for agent by role.
-    Returns dict with provider, model, reason.
+    Returns dict with provider, model, reason, cost_tier, is_default_route, use_stronger_model.
     """
     model_routes = {
         "Product": {
             "provider": "minimax",
             "model": "default",
-            "reason": "需求分析需要稳定通用模型",
+            "reason": "需求分析需要稳定通用模型，v1 暂用默认模型",
+            "cost_tier": "standard",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
         "Architect": {
             "provider": "minimax",
             "model": "default",
-            "reason": "架构设计需要较强推理与结构化输出",
+            "reason": "架构设计需要较强推理与结构化输出，v1 暂用默认模型",
+            "cost_tier": "standard",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
         "TestDesigner": {
             "provider": "minimax",
             "model": "default",
-            "reason": "测试设计需要结构化输出能力",
+            "reason": "测试设计需要结构化输出能力，v1 暂用默认模型",
+            "cost_tier": "standard",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
         "TaskManager": {
             "provider": "minimax",
             "model": "default",
-            "reason": "任务拆解需要稳定规划能力",
+            "reason": "任务拆解需要稳定规划能力，v1 暂用默认模型",
+            "cost_tier": "standard",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
         "Planner": {
             "provider": "minimax",
             "model": "default",
-            "reason": "任务规划需要稳定规划能力",
+            "reason": "任务规划需要稳定规划能力，v1 暂用默认模型",
+            "cost_tier": "standard",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
         "Coder": {
             "provider": "minimax",
             "model": "default",
-            "reason": "当前开发能力先保持一致模型",
+            "reason": "当前真实开发能力先保持默认模型，避免引入额外变量",
+            "cost_tier": "standard",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
         "Reviewer": {
             "provider": "minimax",
             "model": "default",
-            "reason": "代码审查需要稳定判断能力",
+            "reason": "代码审查需要稳定判断能力，v1 暂用默认模型",
+            "cost_tier": "standard",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
         "Tester": {
             "provider": "minimax",
             "model": "default",
-            "reason": "测试验证需要稳定判断能力",
+            "reason": "测试验证需要稳定判断能力，v1 暂用默认模型",
+            "cost_tier": "standard",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
         "Documenter": {
             "provider": "minimax",
             "model": "default",
-            "reason": "交付总结使用默认模型即可",
+            "reason": "交付总结优先低成本，v1 仍走默认模型",
+            "cost_tier": "low",
+            "is_default_route": True,
+            "use_stronger_model": False,
         },
     }
     return model_routes.get(agent_name, {
         "provider": "minimax",
         "model": "default",
         "reason": "默认模型路由",
+        "cost_tier": "standard",
+        "is_default_route": True,
+        "use_stronger_model": False,
     })
 
 
@@ -125,6 +158,15 @@ def call_agent(agent_name: str, prompt: str) -> str:
     # Model Router: select model for agent
     model_route = select_model_for_agent(agent_name)
     agent_model_routes[agent_name] = model_route
+
+    # Record cost info (not tracked in v1)
+    agent_cost_records[agent_name] = {
+        "provider": model_route["provider"],
+        "model": model_route["model"],
+        "cost_tier": model_route["cost_tier"],
+        "estimated_cost": "not_tracked",
+        "token_usage": "not_tracked",
+    }
 
     role_file_map = {
         "Product": PRODUCT_FILE,
@@ -567,6 +609,7 @@ def build_final_report(
     documenter_result: str,
     agent_call_wrapper_status: str,
     model_router_status: str,
+    cost_record_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -588,8 +631,19 @@ def build_final_report(
 
     model_router_lines = []
     for agent, route in sorted(agent_model_routes.items()):
-        model_router_lines.append(f"- {agent}: {route['provider']} / {route['model']}")
-    model_router_section = "\n## Model Router\n\n" + "\n".join(model_router_lines) + "\n" if model_router_lines else ""
+        model_router_lines.append(
+            f"| {agent} | {route['provider']} | {route['model']} | {route['cost_tier']} | {route['is_default_route']} | {route['use_stronger_model']} | {route['reason']} |"
+        )
+    model_router_header = "| Agent | Provider | Model | Cost Tier | Default Route | Stronger Model | Reason |\n|--------|----------|-------|-----------|---------------|----------------|---------|"
+    model_router_section = "\n## Model Router\n\n" + model_router_header + "\n" + "\n".join(model_router_lines) + "\n" if model_router_lines else ""
+
+    cost_record_lines = []
+    for agent, record in sorted(agent_cost_records.items()):
+        cost_record_lines.append(
+            f"| {agent} | {record['provider']} | {record['model']} | {record['cost_tier']} | {record['token_usage']} | {record['estimated_cost']} |"
+        )
+    cost_record_header = "| Agent | Provider | Model | Cost Tier | Token Usage | Estimated Cost |\n|--------|----------|-------|-----------|--------------|-----------------|"
+    cost_record_section = "\n## Cost Record\n\n" + cost_record_header + "\n" + "\n".join(cost_record_lines) + "\n" if cost_record_lines else ""
 
     return f"""# Final Report
 
@@ -658,6 +712,7 @@ def build_final_report(
 
 {tester_result.strip()}
 {model_router_section}
+{cost_record_section}
 """
 
 
@@ -740,6 +795,7 @@ def build_run_log(
     documenter_context_status: str,
     agent_call_wrapper_status: str,
     model_router_status: str,
+    cost_record_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -799,6 +855,7 @@ def build_run_log(
 - Documenter 接收交付上下文：{documenter_context_status}
 - Agent 调用统一入口：{agent_call_wrapper_status}
 - Model Router：{model_router_status}
+- 成本记录：{cost_record_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -912,6 +969,7 @@ def build_summary(
     documenter_context_status: str,
     agent_call_wrapper_status: str,
     model_router_status: str,
+    cost_record_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -950,6 +1008,7 @@ def build_summary(
 - Documenter 接收交付上下文：{documenter_context_status}
 - Agent 调用统一入口：{agent_call_wrapper_status}
 - Model Router：{model_router_status}
+- 成本记录：{cost_record_status}
 - Error：{error_text}
 """
 
@@ -1201,6 +1260,7 @@ DELIVERY RESULT:
 
         agent_call_wrapper_status = "已启用"
         model_router_status = "已启用"
+        cost_record_status = "已记录"
 
         final_report = build_final_report(
             task,
@@ -1238,6 +1298,7 @@ DELIVERY RESULT:
             documenter_result,
             agent_call_wrapper_status,
             model_router_status,
+            cost_record_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1269,6 +1330,7 @@ DELIVERY RESULT:
             documenter_context_status,
             agent_call_wrapper_status,
             model_router_status,
+            cost_record_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1300,6 +1362,7 @@ DELIVERY RESULT:
             documenter_context_status,
             agent_call_wrapper_status,
             model_router_status,
+            cost_record_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1343,6 +1406,7 @@ DELIVERY RESULT:
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
