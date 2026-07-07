@@ -19,6 +19,7 @@ PLANNER_FILE = ROOT / "Planner.md"
 CODER_FILE = ROOT / "Coder.md"
 REVIEWER_FILE = ROOT / "Reviewer.md"
 TESTER_FILE = ROOT / "Tester.md"
+DOCUMENTER_FILE = ROOT / "Documenter.md"
 TASK_FILE = ROOT / "tasks" / "task.txt"
 
 OUTPUT_DIR = ROOT / "outputs"
@@ -51,6 +52,30 @@ def read_text(path: Path) -> str:
 def save_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def call_agent(agent_name: str, prompt: str) -> str:
+    """
+    统一 Agent 模型调用入口。
+    C-43: Model Router will select model by agent_name here.
+    """
+    role_file_map = {
+        "Product": PRODUCT_FILE,
+        "Architect": ARCHITECT_FILE,
+        "TestDesigner": TEST_DESIGNER_FILE,
+        "TaskManager": TASK_MANAGER_FILE,
+        "Planner": PLANNER_FILE,
+        "Coder": CODER_FILE,
+        "Reviewer": REVIEWER_FILE,
+        "Tester": TESTER_FILE,
+        "Documenter": DOCUMENTER_FILE,
+    }
+
+    if agent_name not in role_file_map:
+        raise ValueError(f"Unknown agent: {agent_name}")
+
+    role_content = read_text(role_file_map[agent_name])
+    return call_minimax(role_content, prompt)
 
 
 def call_minimax(system_prompt: str, user_prompt: str) -> str:
@@ -145,8 +170,6 @@ def extract_html_code(markdown_text: str) -> str | None:
 
 
 def run_product(task: str) -> str:
-    product_role = read_text(PRODUCT_FILE)
-
     user_prompt = f"""
 下面是用户原始想法或任务：
 
@@ -155,12 +178,10 @@ def run_product(task: str) -> str:
 请你作为 Product Agent，按你的固定输出格式生成最小 PRD。
 """
 
-    return call_minimax(product_role, user_prompt)
+    return call_agent("Product", user_prompt)
 
 
 def run_architect(task: str, product_result: str) -> str:
-    architect_role = read_text(ARCHITECT_FILE)
-
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -173,7 +194,7 @@ def run_architect(task: str, product_result: str) -> str:
 请你作为 Architect Agent，基于用户原始任务和 PRD，按你的固定输出格式生成最小 SDD。
 """
 
-    return call_minimax(architect_role, user_prompt)
+    return call_agent("Architect", user_prompt)
 
 
 def run_test_designer(
@@ -181,8 +202,6 @@ def run_test_designer(
     product_result: str,
     architect_result: str,
 ) -> str:
-    test_designer_role = read_text(TEST_DESIGNER_FILE)
-
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -199,7 +218,7 @@ def run_test_designer(
 请你作为 TestDesigner Agent，基于用户原始任务、PRD 和 SDD，按你的固定输出格式生成最小 TDD。
 """
 
-    return call_minimax(test_designer_role, user_prompt)
+    return call_agent("TestDesigner", user_prompt)
 
 
 def run_task_manager(
@@ -208,8 +227,6 @@ def run_task_manager(
     architect_result: str,
     test_designer_result: str,
 ) -> str:
-    task_manager_role = read_text(TASK_MANAGER_FILE)
-
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -230,7 +247,7 @@ def run_task_manager(
 请你作为 TaskManager Agent，基于用户原始任务、PRD、SDD 和 TDD，按你的固定输出格式生成任务拆分清单 TASKS。
 """
 
-    return call_minimax(task_manager_role, user_prompt)
+    return call_agent("TaskManager", user_prompt)
 
 
 def run_planner(
@@ -240,8 +257,6 @@ def run_planner(
     test_designer_result: str,
     task_manager_result: str,
 ) -> str:
-    planner_role = read_text(PLANNER_FILE)
-
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -266,7 +281,7 @@ def run_planner(
 请你作为 Planner Agent，基于用户原始任务、PRD、SDD、TDD 和 TASKS，按你的固定输出格式生成任务计划。
 """
 
-    return call_minimax(planner_role, user_prompt)
+    return call_agent("Planner", user_prompt)
 
 
 def run_coder(
@@ -277,8 +292,6 @@ def run_coder(
     planner_result: str,
     current_task_scope: str,
 ) -> str:
-    coder_role = read_text(CODER_FILE)
-
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -307,7 +320,7 @@ def run_coder(
 请你作为 Coder Agent，严格按照 Planner 指定范围实现代码。
 """
 
-    return call_minimax(coder_role, user_prompt)
+    return call_agent("Coder", user_prompt)
 
 
 def run_reviewer(
@@ -318,8 +331,6 @@ def run_reviewer(
     planner_result: str,
     coder_result: str,
 ) -> str:
-    reviewer_role = read_text(REVIEWER_FILE)
-
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -365,7 +376,7 @@ CODER OUTPUT:
 请你作为 Reviewer Agent，基于用户原始任务、PRD、SDD、TDD、Planner 计划和 Coder 实现进行代码审查。Reviewer 必须基于完整上下文进行代码审查，不仅检查代码结果，还需要验证实现是否符合需求、架构和测试设计。
 """
 
-    return call_minimax(reviewer_role, user_prompt)
+    return call_agent("Reviewer", user_prompt)
 
 
 def run_tester(
@@ -377,8 +388,6 @@ def run_tester(
     coder_result: str,
     reviewer_result: str,
 ) -> str:
-    tester_role = read_text(TESTER_FILE)
-
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -431,15 +440,10 @@ REVIEWER OUTPUT:
 请你作为 Tester Agent，根据用户任务、PRD、SDD、TDD、Planner 计划、Coder 实现和 Reviewer 结论，按你的固定输出格式设计最小测试方案并给出测试结论。Tester 必须基于完整上下文验证最终结果，不仅运行测试，还需要确认需求、架构、实现和审查意见的一致性。
 """
 
-    return call_minimax(tester_role, user_prompt)
-
-
-DOCUMENTER_FILE = Path("Documenter.md")
+    return call_agent("Tester", user_prompt)
 
 
 def run_documenter(delivery_context: str) -> str:
-    documenter_role = read_text(DOCUMENTER_FILE)
-
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -457,7 +461,7 @@ def run_documenter(delivery_context: str) -> str:
 Documenter 只能基于 Delivery Context 总结，不得虚构未发生的实现、测试或提交。
 """
 
-    return call_minimax(documenter_role, user_prompt)
+    return call_agent("Documenter", user_prompt)
 
 
 def build_final_report(
@@ -494,6 +498,7 @@ def build_final_report(
     documenter_status: str,
     documenter_context_status: str,
     documenter_result: str,
+    agent_call_wrapper_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -538,6 +543,7 @@ def build_final_report(
 - 交付上下文：{delivery_context_status}
 - Documenter：{documenter_status}
 - Documenter 接收交付上下文：{documenter_context_status}
+- Agent 调用统一入口：{agent_call_wrapper_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -657,6 +663,7 @@ def build_run_log(
     delivery_context_status: str,
     documenter_status: str,
     documenter_context_status: str,
+    agent_call_wrapper_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -714,6 +721,7 @@ def build_run_log(
 - 交付上下文：{delivery_context_status}
 - Documenter：{documenter_status}
 - Documenter 接收交付上下文：{documenter_context_status}
+- Agent 调用统一入口：{agent_call_wrapper_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -825,6 +833,7 @@ def build_summary(
     delivery_context_status: str,
     documenter_status: str,
     documenter_context_status: str,
+    agent_call_wrapper_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -861,6 +870,7 @@ def build_summary(
 - 交付上下文：{delivery_context_status}
 - Documenter：{documenter_status}
 - Documenter 接收交付上下文：{documenter_context_status}
+- Agent 调用统一入口：{agent_call_wrapper_status}
 - Error：{error_text}
 """
 
@@ -1110,6 +1120,8 @@ DELIVERY RESULT:
         )
         workflow_result = "通过" if workflow_passed else "未通过"
 
+        agent_call_wrapper_status = "已启用"
+
         final_report = build_final_report(
             task,
             product_result,
@@ -1144,6 +1156,7 @@ DELIVERY RESULT:
             documenter_status,
             documenter_context_status,
             documenter_result,
+            agent_call_wrapper_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1173,6 +1186,7 @@ DELIVERY RESULT:
             delivery_context_status,
             documenter_status,
             documenter_context_status,
+            agent_call_wrapper_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1202,6 +1216,7 @@ DELIVERY RESULT:
             delivery_context_status,
             documenter_status,
             documenter_context_status,
+            agent_call_wrapper_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1245,6 +1260,8 @@ DELIVERY RESULT:
             False,
             False,
             False,
+            "跳过",
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
