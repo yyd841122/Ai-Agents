@@ -201,6 +201,37 @@ def run_test_designer(
     return call_minimax(test_designer_role, user_prompt)
 
 
+def run_task_manager(
+    task: str,
+    product_result: str,
+    architect_result: str,
+    test_designer_result: str,
+) -> str:
+    task_manager_role = read_text(TASK_MANAGER_FILE)
+
+    user_prompt = f"""
+下面是用户原始任务：
+
+{task}
+
+下面是 Product Agent 生成的 PRD：
+
+{product_result}
+
+下面是 Architect Agent 生成的 SDD：
+
+{architect_result}
+
+下面是 TestDesigner Agent 生成的 TDD：
+
+{test_designer_result}
+
+请你作为 TaskManager Agent，基于用户原始任务、PRD、SDD 和 TDD，按你的固定输出格式生成任务拆分清单 TASKS。
+"""
+
+    return call_minimax(task_manager_role, user_prompt)
+
+
 def run_planner(
     task: str,
     product_result: str,
