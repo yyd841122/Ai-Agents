@@ -461,10 +461,16 @@ def build_final_report(
     sdd_generated: bool,
     tdd_generated: bool,
     tasks_generated: bool,
+    revise_context_status: str,
+    revise_context: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
     tasks_status = "已生成" if tasks_generated else "未生成"
+
+    revise_section = ""
+    if revise_context_status == "已生成":
+        revise_section = f"\n## Revise Context\n\nReviewer 未通过，已生成修订上下文。下一轮 Coder 应基于 Reviewer Output 修复问题。\n"
 
     return f"""# Final Report
 
@@ -487,9 +493,10 @@ def build_final_report(
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - Reviewer 接收审查上下文：{reviewer_context_status}
+- 修订上下文：{revise_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
-- TASKS：{tasks_status}
+- TASKS：{tasks_status}{revise_section}
 
 ## User Task
 
@@ -602,6 +609,7 @@ def build_run_log(
     reviewer_sdd_status: str,
     reviewer_tdd_status: str,
     reviewer_context_status: str,
+    revise_context_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -655,6 +663,7 @@ def build_run_log(
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - Reviewer 接收审查上下文：{reviewer_context_status}
+- 修订上下文：{revise_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -762,6 +771,7 @@ def build_summary(
     reviewer_sdd_status: str,
     reviewer_tdd_status: str,
     reviewer_context_status: str,
+    revise_context_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -794,6 +804,7 @@ def build_summary(
 - Reviewer 接收 SDD：{reviewer_sdd_status}
 - Reviewer 接收 TDD：{reviewer_tdd_status}
 - Reviewer 接收审查上下文：{reviewer_context_status}
+- 修订上下文：{revise_context_status}
 - Error：{error_text}
 """
 
@@ -949,6 +960,35 @@ def main():
         tester_tdd_status = "已接收" if tester_status == "完成" else "跳过"
         tester_context_status = "已接收" if tester_status == "完成" else "跳过"
 
+        if not reviewer_is_passed:
+            revise_context_status = "已生成"
+            revise_context = f"""========== REVISE CONTEXT ==========
+
+PRD:
+{product_result}
+
+SDD:
+{architect_result}
+
+TDD:
+{test_designer_result}
+
+TASK SCOPE:
+{planner_result}
+
+CODER OUTPUT:
+{coder_result}
+
+REVIEWER OUTPUT:
+{reviewer_result}
+
+REVISION REQUIREMENT:
+Coder 下一轮必须基于 Reviewer Output 修复问题，并保持 PRD、SDD、TDD 和 Task Scope 一致。
+"""
+        else:
+            revise_context_status = "无需修订"
+            revise_context = ""
+
         workflow_passed = (
             reviewer_is_passed
             and tester_status == "完成"
@@ -987,6 +1027,8 @@ def main():
             sdd_generated,
             tdd_generated,
             tasks_generated,
+            revise_context_status,
+            revise_context,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1012,6 +1054,7 @@ def main():
             reviewer_sdd_status,
             reviewer_tdd_status,
             reviewer_context_status,
+            revise_context_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1037,6 +1080,7 @@ def main():
             reviewer_sdd_status,
             reviewer_tdd_status,
             reviewer_context_status,
+            revise_context_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1080,6 +1124,7 @@ def main():
             False,
             False,
             False,
+            "跳过",
             "跳过",
             "跳过",
             "跳过",
