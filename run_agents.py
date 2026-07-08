@@ -45,6 +45,99 @@ MINIMAX_BASE_URL = os.getenv(
 # Failure Injection Switch: target agent name (default: disabled)
 FAIL_AGENT = os.getenv("FAIL_AGENT", "").strip()
 
+# Real Project Workspace Switch: project root path (default: disabled)
+PROJECT_ROOT = os.getenv("PROJECT_ROOT", "").strip()
+
+# B-01: Real project workspace info (global, set in main)
+agent_workspace_info: dict = {}
+
+
+def detect_project_workspace() -> dict:
+    """
+    B-01: Detect real project workspace and perform safety boundary check.
+    Returns dict with enabled, project_root, exists, is_directory,
+    is_inside_platform_root, safety_status, detection_status, reason.
+    """
+    if not PROJECT_ROOT:
+        return {
+            "enabled": False,
+            "project_root": "",
+            "exists": False,
+            "is_directory": False,
+            "is_inside_platform_root": False,
+            "safety_status": "not_enabled",
+            "detection_status": "未启用",
+            "reason": "PROJECT_ROOT 未设置，未绑定真实项目工作区",
+        }
+
+    abs_path = Path(PROJECT_ROOT).resolve()
+    platform_root = ROOT.resolve()
+
+    is_inside_platform_root = False
+    try:
+        abs_path.relative_to(platform_root)
+        is_inside_platform_root = True
+    except ValueError:
+        is_inside_platform_root = False
+
+    abs_path_str = str(abs_path)
+    exists = abs_path.exists()
+    is_directory = abs_path.is_dir() if exists else False
+
+    if is_inside_platform_root:
+        return {
+            "enabled": True,
+            "project_root": abs_path_str,
+            "exists": exists,
+            "is_directory": is_directory,
+            "is_inside_platform_root": True,
+            "safety_status": "blocked",
+            "detection_status": "已阻止",
+            "reason": "PROJECT_ROOT 指向平台自身或其子目录，禁止作为真实开发目标",
+        }
+
+    if not exists:
+        return {
+            "enabled": True,
+            "project_root": abs_path_str,
+            "exists": False,
+            "is_directory": False,
+            "is_inside_platform_root": False,
+            "safety_status": "invalid",
+            "detection_status": "无效",
+            "reason": "PROJECT_ROOT 不存在",
+        }
+
+    if not is_directory:
+        return {
+            "enabled": True,
+            "project_root": abs_path_str,
+            "exists": True,
+            "is_directory": False,
+            "is_inside_platform_root": False,
+            "safety_status": "invalid",
+            "detection_status": "无效",
+            "reason": "PROJECT_ROOT 不是目录",
+        }
+
+    return {
+        "enabled": True,
+        "project_root": abs_path_str,
+        "exists": True,
+        "is_directory": True,
+        "is_inside_platform_root": False,
+        "safety_status": "safe",
+        "detection_status": "已识别",
+        "reason": "真实项目工作区已识别",
+    }
+
+
+def project_workspace_status(workspace_info: dict) -> str:
+    """
+    B-01: Get project workspace report status.
+    """
+    return workspace_info.get("detection_status", "未启用")
+
 
 def should_inject_failure(agent_name: str) -> bool:
     """
@@ -787,6 +880,7 @@ def build_final_report(
     failure_injection_matrix_status: str,
     route_c_acceptance_status: str,
     route_b_entry_baseline_status: str,
+    project_workspace_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -860,6 +954,11 @@ def build_final_report(
 
     route_b_entry_baseline_section = "\n## Route B Entry Baseline\n\n路线 B 进入前基线文档已建立：docs/ROUTE_B_ENTRY_BASELINE.md\n\n路线 B 进入基线：已冻结\n"
 
+    if agent_workspace_info:
+        project_workspace_section = f"\n## Project Workspace\n\n- Enabled: {agent_workspace_info.get('enabled')}\n- Project Root: {agent_workspace_info.get('project_root')}\n- Exists: {agent_workspace_info.get('exists')}\n- Is Directory: {agent_workspace_info.get('is_directory')}\n- Inside Platform Root: {agent_workspace_info.get('is_inside_platform_root')}\n- Safety Status: {agent_workspace_info.get('safety_status')}\n- Detection Status: {agent_workspace_info.get('detection_status')}\n- Reason: {agent_workspace_info.get('reason')}\n"
+    else:
+        project_workspace_section = "\n## Project Workspace\n\nDetection Status: 未启用\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -895,6 +994,7 @@ def build_final_report(
 - 失败注入矩阵：{failure_injection_matrix_status}
 - 路线 C 最终验收：{route_c_acceptance_status}
 - 路线 B 进入基线：{route_b_entry_baseline_status}
+- 项目工作区：{project_workspace_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -943,6 +1043,7 @@ def build_final_report(
 {failure_injection_matrix_section}
 {route_c_acceptance_section}
 {route_b_entry_baseline_section}
+{project_workspace_section}
 """
 
 
@@ -1033,6 +1134,7 @@ def build_run_log(
     failure_injection_matrix_status: str,
     route_c_acceptance_status: str,
     route_b_entry_baseline_status: str,
+    project_workspace_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1100,6 +1202,7 @@ def build_run_log(
 - 失败注入矩阵：{failure_injection_matrix_status}
 - 路线 C 最终验收：{route_c_acceptance_status}
 - 路线 B 进入基线：{route_b_entry_baseline_status}
+- 项目工作区：{project_workspace_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1233,6 +1336,7 @@ def build_summary(
     failure_injection_matrix_status: str,
     route_c_acceptance_status: str,
     route_b_entry_baseline_status: str,
+    project_workspace_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1279,6 +1383,7 @@ def build_summary(
 - 失败注入矩阵：{failure_injection_matrix_status}
 - 路线 C 最终验收：{route_c_acceptance_status}
 - 路线 B 进入基线：{route_b_entry_baseline_status}
+- 项目工作区：{project_workspace_status}
 - Error：{error_text}
 """
 
@@ -1290,6 +1395,10 @@ def main():
     reports_dir = run_dir / "reports"
     artifacts_dir = run_dir / "artifacts"
     docs_dir = run_dir / "docs"
+
+    # B-01: Detect real project workspace
+    global agent_workspace_info
+    agent_workspace_info = detect_project_workspace()
 
     current_stage = "Startup"
 
@@ -1537,6 +1646,7 @@ DELIVERY RESULT:
         failure_injection_matrix_status = "已建立"
         route_c_acceptance_status = "已通过"
         route_b_entry_baseline_status = "已冻结"
+        project_workspace_status_value = project_workspace_status(agent_workspace_info)
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -1583,6 +1693,7 @@ DELIVERY RESULT:
             failure_injection_matrix_status,
             route_c_acceptance_status,
             route_b_entry_baseline_status,
+            project_workspace_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1622,6 +1733,7 @@ DELIVERY RESULT:
             failure_injection_matrix_status,
             route_c_acceptance_status,
             route_b_entry_baseline_status,
+            project_workspace_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1661,6 +1773,7 @@ DELIVERY RESULT:
             failure_injection_matrix_status,
             route_c_acceptance_status,
             route_b_entry_baseline_status,
+            project_workspace_status_value,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1701,6 +1814,7 @@ DELIVERY RESULT:
         failure_injection_matrix_status = "已建立"
         route_c_acceptance_status = "待确认"
         route_b_entry_baseline_status = "待确认"
+        project_workspace_status_value = project_workspace_status(agent_workspace_info)
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
@@ -1742,6 +1856,7 @@ DELIVERY RESULT:
             failure_injection_matrix_status,
             route_c_acceptance_status,
             route_b_entry_baseline_status,
+            project_workspace_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -1796,6 +1911,7 @@ DELIVERY RESULT:
                     failure_injection_matrix_status,
                     route_c_acceptance_status,
                     route_b_entry_baseline_status,
+                    project_workspace_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
