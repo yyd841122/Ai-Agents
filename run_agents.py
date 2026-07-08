@@ -54,6 +54,132 @@ agent_workspace_info: dict = {}
 # B-02: Real task protocol info (global, set in main)
 real_task_protocol_info: dict = {}
 
+# B-03: Real file modification result (global, set in main)
+real_file_modification_info: dict = {}
+
+
+def apply_coder_output_to_project(
+    coder_result: str,
+    workspace_info: dict,
+    real_task_protocol: dict,
+) -> dict:
+    """
+    B-03: Apply Coder output to real project in a controlled manner.
+    Only allowed to modify PROJECT_ROOT/app.html when protocol is established.
+    Returns dict with enabled, status, target_file, changed_files,
+    skipped_reason, safety_status, operation.
+    """
+    detection = workspace_info.get("detection_status", "未启用")
+    safety = workspace_info.get("safety_status", "not_enabled")
+
+    if detection != "已识别" or safety != "safe":
+        enabled = False
+        if detection == "已阻止":
+            status = "已阻止"
+            skipped = "项目工作区被阻止，禁止真实文件修改"
+        elif detection == "无效":
+            status = "无效"
+            skipped = "项目工作区无效，禁止真实文件修改"
+        else:
+            status = "未启用"
+            skipped = "未绑定真实项目工作区"
+        return {
+            "enabled": enabled,
+            "status": status,
+            "target_file": "",
+            "changed_files": [],
+            "skipped_reason": skipped,
+            "safety_status": safety,
+            "operation": "none",
+        }
+
+    if (
+        real_task_protocol.get("protocol_status") != "已建立"
+        or not real_task_protocol.get("enabled")
+    ):
+        return {
+            "enabled": False,
+            "status": "未启用",
+            "target_file": "",
+            "changed_files": [],
+            "skipped_reason": "真实任务协议未建立，禁止真实文件修改",
+            "safety_status": safety,
+            "operation": "none",
+        }
+
+    project_root = Path(workspace_info["project_root"]).resolve()
+    target_file = project_root / "app.html"
+
+    try:
+        target_file.resolve().relative_to(project_root)
+    except ValueError:
+        return {
+            "enabled": True,
+            "status": "已阻止",
+            "target_file": str(target_file),
+            "changed_files": [],
+            "skipped_reason": "目标文件不在 PROJECT_ROOT 内",
+            "safety_status": "blocked",
+            "operation": "blocked_path_escape",
+        }
+
+    if target_file.name != "app.html":
+        return {
+            "enabled": True,
+            "status": "已阻止",
+            "target_file": str(target_file),
+            "changed_files": [],
+            "skipped_reason": "B-03 仅允许修改 app.html",
+            "safety_status": "blocked",
+            "operation": "blocked_wrong_filename",
+        }
+
+    if not target_file.exists():
+        return {
+            "enabled": True,
+            "status": "跳过",
+            "target_file": str(target_file),
+            "changed_files": [],
+            "skipped_reason": "PROJECT_ROOT 下不存在 app.html，B-03 不自动创建文件",
+            "safety_status": "safe",
+            "operation": "skip_missing_file",
+        }
+
+    if not target_file.is_file():
+        return {
+            "enabled": True,
+            "status": "跳过",
+            "target_file": str(target_file),
+            "changed_files": [],
+            "skipped_reason": "目标路径不是文件",
+            "safety_status": "safe",
+            "operation": "skip_not_file",
+        }
+
+    html_code = extract_html_code(coder_result)
+    if html_code is None:
+        return {
+            "enabled": True,
+            "status": "跳过",
+            "target_file": str(target_file),
+            "changed_files": [],
+            "skipped_reason": "Coder 输出中未找到 html 代码块",
+            "safety_status": "safe",
+            "operation": "skip_no_html_code",
+        }
+
+    save_text(target_file, html_code)
+
+    return {
+        "enabled": True,
+        "status": "已修改",
+        "target_file": str(target_file),
+        "changed_files": [str(target_file)],
+        "skipped_reason": "",
+        "safety_status": "safe",
+        "operation": "write_app_html",
+    }
+
 
 def detect_project_workspace() -> dict:
     """
@@ -984,6 +1110,7 @@ def build_final_report(
     route_b_entry_baseline_status: str,
     project_workspace_status: str,
     real_task_protocol_status: str,
+    real_file_modification_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -1087,6 +1214,27 @@ def build_final_report(
     else:
         real_task_protocol_section = "\n## Real Task Protocol\n\nProtocol Status: 未启用\n"
 
+    if real_file_modification_info:
+        rfm = real_file_modification_info
+        rfm_lines = [
+            f"- Enabled: {rfm.get('enabled')}",
+            f"- Status: {rfm.get('status')}",
+            f"- Target File: {rfm.get('target_file')}",
+            f"- Skipped Reason: {rfm.get('skipped_reason')}",
+            f"- Safety Status: {rfm.get('safety_status')}",
+            f"- Operation: {rfm.get('operation')}",
+        ]
+        changed = rfm.get("changed_files", [])
+        if changed:
+            rfm_lines.append("- Changed Files:")
+            for f in changed:
+                rfm_lines.append(f"  - {f}")
+        else:
+            rfm_lines.append("- Changed Files: (none)")
+        real_file_modification_section = "\n## Real File Modification\n\n" + "\n".join(rfm_lines) + "\n"
+    else:
+        real_file_modification_section = "\n## Real File Modification\n\nStatus: 未启用\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -1124,6 +1272,7 @@ def build_final_report(
 - 路线 B 进入基线：{route_b_entry_baseline_status}
 - 项目工作区：{project_workspace_status}
 - 真实任务协议：{real_task_protocol_status}
+- 真实文件修改：{real_file_modification_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -1174,6 +1323,7 @@ def build_final_report(
 {route_b_entry_baseline_section}
 {project_workspace_section}
 {real_task_protocol_section}
+{real_file_modification_section}
 """
 
 
@@ -1266,6 +1416,7 @@ def build_run_log(
     route_b_entry_baseline_status: str,
     project_workspace_status: str,
     real_task_protocol_status: str,
+    real_file_modification_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1335,6 +1486,7 @@ def build_run_log(
 - 路线 B 进入基线：{route_b_entry_baseline_status}
 - 项目工作区：{project_workspace_status}
 - 真实任务协议：{real_task_protocol_status}
+- 真实文件修改：{real_file_modification_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1470,6 +1622,7 @@ def build_summary(
     route_b_entry_baseline_status: str,
     project_workspace_status: str,
     real_task_protocol_status: str,
+    real_file_modification_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1518,6 +1671,7 @@ def build_summary(
 - 路线 B 进入基线：{route_b_entry_baseline_status}
 - 项目工作区：{project_workspace_status}
 - 真实任务协议：{real_task_protocol_status}
+- 真实文件修改：{real_file_modification_status}
 - Error：{error_text}
 """
 
@@ -1629,6 +1783,14 @@ def main():
         if html_code:
             save_text(artifacts_dir / "app.html", html_code)
             app_html_generated = True
+
+        # B-03: Apply Coder output to real project (controlled write to PROJECT_ROOT/app.html)
+        global real_file_modification_info
+        real_file_modification_info = apply_coder_output_to_project(
+            coder_result,
+            agent_workspace_info,
+            real_task_protocol_info,
+        )
 
         print("========== Reviewer 正在审查代码 ==========")
         current_stage = "Reviewer"
@@ -1786,6 +1948,7 @@ DELIVERY RESULT:
         route_b_entry_baseline_status = "已冻结"
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
         real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
+        real_file_modification_status_value = real_file_modification_info.get("status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -1834,6 +1997,7 @@ DELIVERY RESULT:
             route_b_entry_baseline_status,
             project_workspace_status_value,
             real_task_protocol_status_value,
+            real_file_modification_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1875,6 +2039,7 @@ DELIVERY RESULT:
             route_b_entry_baseline_status,
             project_workspace_status_value,
             real_task_protocol_status_value,
+            real_file_modification_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1916,6 +2081,7 @@ DELIVERY RESULT:
             route_b_entry_baseline_status,
             project_workspace_status_value,
             real_task_protocol_status_value,
+            real_file_modification_status_value,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1958,6 +2124,7 @@ DELIVERY RESULT:
         route_b_entry_baseline_status = "待确认"
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
         real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
+        real_file_modification_status_value = real_file_modification_info.get("status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
@@ -2001,6 +2168,7 @@ DELIVERY RESULT:
             route_b_entry_baseline_status,
             project_workspace_status_value,
             real_task_protocol_status_value,
+            real_file_modification_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -2057,6 +2225,7 @@ DELIVERY RESULT:
                     route_b_entry_baseline_status,
                     project_workspace_status_value,
                     real_task_protocol_status_value,
+                    real_file_modification_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
