@@ -1598,10 +1598,15 @@ DELIVERY RESULT:
         error_report = build_error_report(error)
         save_text(reports_dir / "error_report.md", error_report)
 
+        agent_call_wrapper_status = "已启用"
+        model_router_status = "已启用"
+        cost_record_status = "已记录"
+        fallback_policy_status = "已记录"
+        failure_policy_executor_status = "已启用"
+        failure_capture_status = "已启用"
+
         run_log = build_error_run_log(run_dir, error, current_stage)
         save_text(reports_dir / "run_log.md", run_log)
-
-        failure_capture_status = "已启用"
 
         summary = build_summary(
             run_dir,
@@ -1629,18 +1634,66 @@ DELIVERY RESULT:
             "跳过",
             "跳过",
             "跳过",
-            "跳过",
-            "跳过",
-            "跳过",
-            "跳过",
-            "跳过",
-            "跳过",
-            "跳过",
-            "跳过",
+            agent_call_wrapper_status,
+            model_router_status,
+            cost_record_status,
+            fallback_policy_status,
+            failure_policy_executor_status,
             failure_capture_status,
             error,
         )
         save_text(run_dir / "summary.md", summary)
+
+        try:
+            partial_results = {
+                stage: locals().get(f"{stage.lower()}_result", f"{stage} 未完成")
+                for stage in WORKFLOW_STAGES
+            }
+            if agent_model_routes or agent_cost_records or agent_fallback_policies or agent_execution_records or agent_failure_records:
+                final_report = build_final_report(
+                    task,
+                    partial_results.get("Product", "Product 未完成"),
+                    partial_results.get("Architect", "Architect 未完成"),
+                    partial_results.get("TestDesigner", "TestDesigner 未完成"),
+                    partial_results.get("TaskManager", "TaskManager 未完成"),
+                    partial_results.get("Planner", "Planner 未完成"),
+                    partial_results.get("Coder", "Coder 未完成"),
+                    partial_results.get("Reviewer", "Reviewer 未完成"),
+                    partial_results.get("Tester", "Tester 未完成"),
+                    "未通过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    "跳过",
+                    bool(partial_results.get("Architect")),
+                    bool(partial_results.get("TestDesigner")),
+                    bool(partial_results.get("TaskManager")),
+                    "无需修订",
+                    "",
+                    "跳过",
+                    "",
+                    "跳过",
+                    "跳过",
+                    "",
+                    agent_call_wrapper_status,
+                    model_router_status,
+                    cost_record_status,
+                    fallback_policy_status,
+                    failure_policy_executor_status,
+                    failure_capture_status,
+                )
+                save_text(reports_dir / "final_report.md", final_report)
+        except Exception as fe:
+            print(f"Warning: failed to generate final_report on error path: {fe}")
 
         update_latest(run_dir)
 
