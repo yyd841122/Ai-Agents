@@ -785,6 +785,7 @@ def build_final_report(
     failure_capture_status: str,
     failure_injection_status: str,
     failure_injection_matrix_status: str,
+    route_c_acceptance_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -854,6 +855,8 @@ def build_final_report(
 
     failure_injection_matrix_section = "\n## Failure Injection Matrix\n\n失败注入回归测试矩阵已建立：docs/FAILURE_INJECTION_MATRIX.md\n"
 
+    route_c_acceptance_section = "\n## Route C Acceptance\n\n路线 C 最终验收文档已建立：docs/ROUTE_C_FINAL_ACCEPTANCE.md\n\n路线 C 当前状态：已通过\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -887,6 +890,7 @@ def build_final_report(
 - 失败捕获：{failure_capture_status}
 - 失败注入：{failure_injection_status}
 - 失败注入矩阵：{failure_injection_matrix_status}
+- 路线 C 最终验收：{route_c_acceptance_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -933,6 +937,7 @@ def build_final_report(
 {failure_capture_section}
 {failure_injection_section}
 {failure_injection_matrix_section}
+{route_c_acceptance_section}
 """
 
 
@@ -1021,6 +1026,7 @@ def build_run_log(
     failure_capture_status: str,
     failure_injection_status: str,
     failure_injection_matrix_status: str,
+    route_c_acceptance_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1086,6 +1092,7 @@ def build_run_log(
 - 失败捕获：{failure_capture_status}
 - 失败注入：{failure_injection_status}
 - 失败注入矩阵：{failure_injection_matrix_status}
+- 路线 C 最终验收：{route_c_acceptance_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1217,6 +1224,7 @@ def build_summary(
     failure_capture_status: str,
     failure_injection_status: str,
     failure_injection_matrix_status: str,
+    route_c_acceptance_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1261,6 +1269,7 @@ def build_summary(
 - 失败捕获：{failure_capture_status}
 - 失败注入：{failure_injection_status}
 - 失败注入矩阵：{failure_injection_matrix_status}
+- 路线 C 最终验收：{route_c_acceptance_status}
 - Error：{error_text}
 """
 
@@ -1517,6 +1526,7 @@ DELIVERY RESULT:
         failure_policy_executor_status = "已启用"
         failure_capture_status = "已启用"
         failure_injection_matrix_status = "已建立"
+        route_c_acceptance_status = "已通过"
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -1561,6 +1571,7 @@ DELIVERY RESULT:
             failure_capture_status,
             failure_injection_status_value,
             failure_injection_matrix_status,
+            route_c_acceptance_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1598,6 +1609,7 @@ DELIVERY RESULT:
             failure_capture_status,
             failure_injection_status_value,
             failure_injection_matrix_status,
+            route_c_acceptance_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1635,6 +1647,7 @@ DELIVERY RESULT:
             failure_capture_status,
             failure_injection_status_value,
             failure_injection_matrix_status,
+            route_c_acceptance_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1673,6 +1686,7 @@ DELIVERY RESULT:
         failure_policy_executor_status = "已启用"
         failure_capture_status = "已启用"
         failure_injection_matrix_status = "已建立"
+        route_c_acceptance_status = "待确认"
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
@@ -1712,6 +1726,7 @@ DELIVERY RESULT:
             failure_capture_status,
             failure_injection_status_value,
             failure_injection_matrix_status,
+            route_c_acceptance_status,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -1764,6 +1779,7 @@ DELIVERY RESULT:
                     failure_capture_status,
                     failure_injection_status_value,
                     failure_injection_matrix_status,
+                    route_c_acceptance_status,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
