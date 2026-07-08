@@ -51,6 +51,9 @@ PROJECT_ROOT = os.getenv("PROJECT_ROOT", "").strip()
 # B-01: Real project workspace info (global, set in main)
 agent_workspace_info: dict = {}
 
+# B-02: Real task protocol info (global, set in main)
+real_task_protocol_info: dict = {}
+
 
 def detect_project_workspace() -> dict:
     """
@@ -137,6 +140,105 @@ def project_workspace_status(workspace_info: dict) -> str:
     B-01: Get project workspace report status.
     """
     return workspace_info.get("detection_status", "未启用")
+
+
+def build_real_task_protocol(task: str, workspace_info: dict) -> dict:
+    """
+    B-02: Build real task input protocol based on workspace detection.
+    Returns dict with enabled, workspace_status, user_task, project_root,
+    allowed_change_scope, forbidden_scope, acceptance_criteria,
+    safety_rules, protocol_status, reason.
+    """
+    detection = workspace_info.get("detection_status", "未启用")
+    safety = workspace_info.get("safety_status", "not_enabled")
+
+    if detection == "未启用":
+        return {
+            "enabled": False,
+            "workspace_status": "未启用",
+            "user_task": task,
+            "project_root": "",
+            "allowed_change_scope": [],
+            "forbidden_scope": [],
+            "acceptance_criteria": [],
+            "safety_rules": [],
+            "protocol_status": "未启用",
+            "reason": "未绑定真实项目工作区，真实任务协议未启用",
+        }
+
+    if detection == "已阻止":
+        return {
+            "enabled": False,
+            "workspace_status": "已阻止",
+            "user_task": task,
+            "project_root": workspace_info.get("project_root", ""),
+            "allowed_change_scope": [],
+            "forbidden_scope": [],
+            "acceptance_criteria": [],
+            "safety_rules": [],
+            "protocol_status": "已阻止",
+            "reason": "项目工作区被阻止，真实任务协议未启用",
+        }
+
+    if detection == "无效":
+        return {
+            "enabled": False,
+            "workspace_status": "无效",
+            "user_task": task,
+            "project_root": workspace_info.get("project_root", ""),
+            "allowed_change_scope": [],
+            "forbidden_scope": [],
+            "acceptance_criteria": [],
+            "safety_rules": [],
+            "protocol_status": "无效",
+            "reason": "项目工作区无效，真实任务协议未启用",
+        }
+
+    if detection == "已识别" and safety == "safe":
+        return {
+            "enabled": True,
+            "workspace_status": "已识别",
+            "user_task": task,
+            "project_root": workspace_info.get("project_root", ""),
+            "allowed_change_scope": [
+                "仅允许修改 PROJECT_ROOT 内部文件",
+                "仅允许后续任务明确授权的文件范围",
+                "B-02 阶段不执行真实修改",
+            ],
+            "forbidden_scope": [
+                "禁止修改多 Agent 平台自身文件",
+                "禁止修改 PROJECT_ROOT 外部文件",
+                "禁止读取或写入敏感文件",
+                "禁止执行删除、格式化、清空目录等破坏性操作",
+            ],
+            "acceptance_criteria": [
+                "真实项目工作区已识别",
+                "真实任务协议已建立",
+                "后续 Coder 必须基于该协议执行",
+                "当前阶段不产生真实文件修改",
+            ],
+            "safety_rules": [
+                "所有真实开发操作必须限制在 PROJECT_ROOT 内",
+                "任何越权路径必须阻止",
+                "未知或敏感文件必须停止并报告",
+                "真实修改能力从 B-03 开始引入",
+            ],
+            "protocol_status": "已建立",
+            "reason": "真实任务输入协议已建立",
+        }
+
+    return {
+        "enabled": False,
+        "workspace_status": detection,
+        "user_task": task,
+        "project_root": workspace_info.get("project_root", ""),
+        "allowed_change_scope": [],
+        "forbidden_scope": [],
+        "acceptance_criteria": [],
+        "safety_rules": [],
+        "protocol_status": "未启用",
+        "reason": "未知工作区状态，真实任务协议未启用",
+    }
 
 
 def should_inject_failure(agent_name: str) -> bool:
@@ -881,6 +983,7 @@ def build_final_report(
     route_c_acceptance_status: str,
     route_b_entry_baseline_status: str,
     project_workspace_status: str,
+    real_task_protocol_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -959,6 +1062,31 @@ def build_final_report(
     else:
         project_workspace_section = "\n## Project Workspace\n\nDetection Status: 未启用\n"
 
+    if real_task_protocol_info:
+        rtp = real_task_protocol_info
+        rtp_lines = [
+            f"- Enabled: {rtp.get('enabled')}",
+            f"- Workspace Status: {rtp.get('workspace_status')}",
+            f"- Project Root: {rtp.get('project_root')}",
+            f"- Protocol Status: {rtp.get('protocol_status')}",
+            f"- Reason: {rtp.get('reason')}",
+        ]
+        rtp_lines.append("- Allowed Change Scope:")
+        for s in rtp.get("allowed_change_scope", []):
+            rtp_lines.append(f"  - {s}")
+        rtp_lines.append("- Forbidden Scope:")
+        for s in rtp.get("forbidden_scope", []):
+            rtp_lines.append(f"  - {s}")
+        rtp_lines.append("- Acceptance Criteria:")
+        for s in rtp.get("acceptance_criteria", []):
+            rtp_lines.append(f"  - {s}")
+        rtp_lines.append("- Safety Rules:")
+        for s in rtp.get("safety_rules", []):
+            rtp_lines.append(f"  - {s}")
+        real_task_protocol_section = "\n## Real Task Protocol\n\n" + "\n".join(rtp_lines) + "\n"
+    else:
+        real_task_protocol_section = "\n## Real Task Protocol\n\nProtocol Status: 未启用\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -995,6 +1123,7 @@ def build_final_report(
 - 路线 C 最终验收：{route_c_acceptance_status}
 - 路线 B 进入基线：{route_b_entry_baseline_status}
 - 项目工作区：{project_workspace_status}
+- 真实任务协议：{real_task_protocol_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -1044,6 +1173,7 @@ def build_final_report(
 {route_c_acceptance_section}
 {route_b_entry_baseline_section}
 {project_workspace_section}
+{real_task_protocol_section}
 """
 
 
@@ -1135,6 +1265,7 @@ def build_run_log(
     route_c_acceptance_status: str,
     route_b_entry_baseline_status: str,
     project_workspace_status: str,
+    real_task_protocol_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1203,6 +1334,7 @@ def build_run_log(
 - 路线 C 最终验收：{route_c_acceptance_status}
 - 路线 B 进入基线：{route_b_entry_baseline_status}
 - 项目工作区：{project_workspace_status}
+- 真实任务协议：{real_task_protocol_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1337,6 +1469,7 @@ def build_summary(
     route_c_acceptance_status: str,
     route_b_entry_baseline_status: str,
     project_workspace_status: str,
+    real_task_protocol_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1384,6 +1517,7 @@ def build_summary(
 - 路线 C 最终验收：{route_c_acceptance_status}
 - 路线 B 进入基线：{route_b_entry_baseline_status}
 - 项目工作区：{project_workspace_status}
+- 真实任务协议：{real_task_protocol_status}
 - Error：{error_text}
 """
 
@@ -1399,6 +1533,10 @@ def main():
     # B-01: Detect real project workspace
     global agent_workspace_info
     agent_workspace_info = detect_project_workspace()
+
+    # B-02: Build real task protocol
+    global real_task_protocol_info
+    real_task_protocol_info = build_real_task_protocol(task, agent_workspace_info)
 
     current_stage = "Startup"
 
@@ -1647,6 +1785,7 @@ DELIVERY RESULT:
         route_c_acceptance_status = "已通过"
         route_b_entry_baseline_status = "已冻结"
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
+        real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -1694,6 +1833,7 @@ DELIVERY RESULT:
             route_c_acceptance_status,
             route_b_entry_baseline_status,
             project_workspace_status_value,
+            real_task_protocol_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1734,6 +1874,7 @@ DELIVERY RESULT:
             route_c_acceptance_status,
             route_b_entry_baseline_status,
             project_workspace_status_value,
+            real_task_protocol_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1774,6 +1915,7 @@ DELIVERY RESULT:
             route_c_acceptance_status,
             route_b_entry_baseline_status,
             project_workspace_status_value,
+            real_task_protocol_status_value,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1815,6 +1957,7 @@ DELIVERY RESULT:
         route_c_acceptance_status = "待确认"
         route_b_entry_baseline_status = "待确认"
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
+        real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
@@ -1857,6 +2000,7 @@ DELIVERY RESULT:
             route_c_acceptance_status,
             route_b_entry_baseline_status,
             project_workspace_status_value,
+            real_task_protocol_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -1912,6 +2056,7 @@ DELIVERY RESULT:
                     route_c_acceptance_status,
                     route_b_entry_baseline_status,
                     project_workspace_status_value,
+                    real_task_protocol_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
