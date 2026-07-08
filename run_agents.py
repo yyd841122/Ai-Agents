@@ -42,6 +42,29 @@ MINIMAX_BASE_URL = os.getenv(
     "https://api.minimax.chat/v1/chat/completions",
 )
 
+# Failure Injection Switch: target agent name (default: disabled)
+FAIL_AGENT = os.getenv("FAIL_AGENT", "").strip()
+
+
+def should_inject_failure(agent_name: str) -> bool:
+    """
+    Failure Injection Switch: check if the current agent should fail.
+    Controlled by FAIL_AGENT environment variable.
+    Default: disabled.
+    """
+    if not FAIL_AGENT:
+        return False
+    return FAIL_AGENT == agent_name
+
+
+def failure_injection_status() -> str:
+    """
+    Failure Injection Switch: report current status.
+    """
+    if not FAIL_AGENT:
+        return "未启用"
+    return f"已启用：{FAIL_AGENT}"
+
 
 def read_text(path: Path) -> str:
     if not path.exists():
@@ -76,6 +99,7 @@ def execute_agent_with_policy(
     prompt: str,
     model_route: dict,
     fallback_policy: dict,
+    inject_failure: bool = False,
 ) -> tuple[str, dict]:
     """
     Failure Policy Executor v1: execute agent call with policy tracking.
@@ -94,6 +118,8 @@ def execute_agent_with_policy(
     }
 
     try:
+        if inject_failure:
+            raise RuntimeError(f"Injected failure for agent: {agent_name}")
         agent_result = call_minimax(role_content, prompt)
     except Exception as e:
         execution_record["execution_status"] = "failed"
@@ -322,8 +348,9 @@ def call_agent(agent_name: str, prompt: str) -> str:
     role_content = read_text(role_file_map[agent_name])
 
     # Execute with policy tracking
+    inject_failure = should_inject_failure(agent_name)
     agent_result, execution_record = execute_agent_with_policy(
-        agent_name, role_content, prompt, model_route, fallback_policy
+        agent_name, role_content, prompt, model_route, fallback_policy, inject_failure
     )
     agent_execution_records[agent_name] = execution_record
 
@@ -756,6 +783,7 @@ def build_final_report(
     fallback_policy_status: str,
     failure_policy_executor_status: str,
     failure_capture_status: str,
+    failure_injection_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -818,6 +846,11 @@ def build_final_report(
     else:
         failure_capture_section = "\n## Failure Capture\n\n无 Agent 调用失败。\n"
 
+    if FAIL_AGENT:
+        failure_injection_section = f"\n## Failure Injection\n\n失败注入已启用，目标 Agent：{FAIL_AGENT}\n"
+    else:
+        failure_injection_section = "\n## Failure Injection\n\n失败注入未启用。\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -849,6 +882,7 @@ def build_final_report(
 - 失败降级策略：{fallback_policy_status}
 - 失败策略执行层：{failure_policy_executor_status}
 - 失败捕获：{failure_capture_status}
+- 失败注入：{failure_injection_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -893,6 +927,7 @@ def build_final_report(
 {fallback_policy_section}
 {execution_record_section}
 {failure_capture_section}
+{failure_injection_section}
 """
 
 
@@ -979,6 +1014,7 @@ def build_run_log(
     fallback_policy_status: str,
     failure_policy_executor_status: str,
     failure_capture_status: str,
+    failure_injection_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1042,6 +1078,7 @@ def build_run_log(
 - 失败降级策略：{fallback_policy_status}
 - 失败策略执行层：{failure_policy_executor_status}
 - 失败捕获：{failure_capture_status}
+- 失败注入：{failure_injection_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1077,6 +1114,7 @@ def build_run_log(
 
 def build_error_run_log(run_dir: Path, error: Exception, failed_stage: str) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fi_status = failure_injection_status()
 
     return f"""# Run Log
 
@@ -1107,6 +1145,16 @@ def build_error_run_log(run_dir: Path, error: Exception, failed_stage: str) -> s
 ## Status
 
 {build_stage_status_lines(failed_stage)}
+
+## Infrastructure
+
+- Agent 调用统一入口：已启用
+- Model Router：已启用
+- 成本记录：已记录
+- 失败降级策略：已记录
+- 失败策略执行层：已启用
+- 失败捕获：已启用
+- 失败注入：{fi_status}
 
 ## Artifacts
 
@@ -1159,6 +1207,7 @@ def build_summary(
     fallback_policy_status: str,
     failure_policy_executor_status: str,
     failure_capture_status: str,
+    failure_injection_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1201,6 +1250,7 @@ def build_summary(
 - 失败降级策略：{fallback_policy_status}
 - 失败策略执行层：{failure_policy_executor_status}
 - 失败捕获：{failure_capture_status}
+- 失败注入：{failure_injection_status}
 - Error：{error_text}
 """
 
@@ -1456,6 +1506,7 @@ DELIVERY RESULT:
         fallback_policy_status = "已记录"
         failure_policy_executor_status = "已启用"
         failure_capture_status = "已启用"
+        failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
             task,
@@ -1497,6 +1548,7 @@ DELIVERY RESULT:
             fallback_policy_status,
             failure_policy_executor_status,
             failure_capture_status,
+            failure_injection_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1532,6 +1584,7 @@ DELIVERY RESULT:
             fallback_policy_status,
             failure_policy_executor_status,
             failure_capture_status,
+            failure_injection_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1567,6 +1620,7 @@ DELIVERY RESULT:
             fallback_policy_status,
             failure_policy_executor_status,
             failure_capture_status,
+            failure_injection_status_value,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1604,6 +1658,7 @@ DELIVERY RESULT:
         fallback_policy_status = "已记录"
         failure_policy_executor_status = "已启用"
         failure_capture_status = "已启用"
+        failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
         save_text(reports_dir / "run_log.md", run_log)
@@ -1640,6 +1695,7 @@ DELIVERY RESULT:
             fallback_policy_status,
             failure_policy_executor_status,
             failure_capture_status,
+            failure_injection_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -1690,6 +1746,7 @@ DELIVERY RESULT:
                     fallback_policy_status,
                     failure_policy_executor_status,
                     failure_capture_status,
+                    failure_injection_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
