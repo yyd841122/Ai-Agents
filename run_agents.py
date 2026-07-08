@@ -784,6 +784,7 @@ def build_final_report(
     failure_policy_executor_status: str,
     failure_capture_status: str,
     failure_injection_status: str,
+    failure_injection_matrix_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -851,6 +852,8 @@ def build_final_report(
     else:
         failure_injection_section = "\n## Failure Injection\n\n失败注入未启用。\n"
 
+    failure_injection_matrix_section = "\n## Failure Injection Matrix\n\n失败注入回归测试矩阵已建立：docs/FAILURE_INJECTION_MATRIX.md\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -883,6 +886,7 @@ def build_final_report(
 - 失败策略执行层：{failure_policy_executor_status}
 - 失败捕获：{failure_capture_status}
 - 失败注入：{failure_injection_status}
+- 失败注入矩阵：{failure_injection_matrix_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -928,6 +932,7 @@ def build_final_report(
 {execution_record_section}
 {failure_capture_section}
 {failure_injection_section}
+{failure_injection_matrix_section}
 """
 
 
@@ -1015,6 +1020,7 @@ def build_run_log(
     failure_policy_executor_status: str,
     failure_capture_status: str,
     failure_injection_status: str,
+    failure_injection_matrix_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1079,6 +1085,7 @@ def build_run_log(
 - 失败策略执行层：{failure_policy_executor_status}
 - 失败捕获：{failure_capture_status}
 - 失败注入：{failure_injection_status}
+- 失败注入矩阵：{failure_injection_matrix_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1155,6 +1162,7 @@ def build_error_run_log(run_dir: Path, error: Exception, failed_stage: str) -> s
 - 失败策略执行层：已启用
 - 失败捕获：已启用
 - 失败注入：{fi_status}
+- 失败注入矩阵：已建立
 
 ## Artifacts
 
@@ -1208,6 +1216,7 @@ def build_summary(
     failure_policy_executor_status: str,
     failure_capture_status: str,
     failure_injection_status: str,
+    failure_injection_matrix_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1251,6 +1260,7 @@ def build_summary(
 - 失败策略执行层：{failure_policy_executor_status}
 - 失败捕获：{failure_capture_status}
 - 失败注入：{failure_injection_status}
+- 失败注入矩阵：{failure_injection_matrix_status}
 - Error：{error_text}
 """
 
@@ -1506,6 +1516,7 @@ DELIVERY RESULT:
         fallback_policy_status = "已记录"
         failure_policy_executor_status = "已启用"
         failure_capture_status = "已启用"
+        failure_injection_matrix_status = "已建立"
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -1549,6 +1560,7 @@ DELIVERY RESULT:
             failure_policy_executor_status,
             failure_capture_status,
             failure_injection_status_value,
+            failure_injection_matrix_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -1585,6 +1597,7 @@ DELIVERY RESULT:
             failure_policy_executor_status,
             failure_capture_status,
             failure_injection_status_value,
+            failure_injection_matrix_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -1621,6 +1634,7 @@ DELIVERY RESULT:
             failure_policy_executor_status,
             failure_capture_status,
             failure_injection_status_value,
+            failure_injection_matrix_status,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -1658,6 +1672,7 @@ DELIVERY RESULT:
         fallback_policy_status = "已记录"
         failure_policy_executor_status = "已启用"
         failure_capture_status = "已启用"
+        failure_injection_matrix_status = "已建立"
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
@@ -1696,6 +1711,7 @@ DELIVERY RESULT:
             failure_policy_executor_status,
             failure_capture_status,
             failure_injection_status_value,
+            failure_injection_matrix_status,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -1747,6 +1763,7 @@ DELIVERY RESULT:
                     failure_policy_executor_status,
                     failure_capture_status,
                     failure_injection_status_value,
+                    failure_injection_matrix_status,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
