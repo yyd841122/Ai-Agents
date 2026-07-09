@@ -57,6 +57,62 @@ real_task_protocol_info: dict = {}
 # B-03: Real file modification result (global, set in main)
 real_file_modification_info: dict = {}
 
+# B-04: Project change record (global, set in main)
+project_change_record_info: dict = {}
+
+
+def build_simple_diff_summary(before_content: str, after_content: str) -> dict:
+    """
+    B-04: Build a simple diff summary for a single file.
+    Returns dict with changed, before_size, after_size,
+    before_line_count, after_line_count, first_changed_line, summary.
+    """
+    if before_content == after_content:
+        return {
+            "changed": False,
+            "before_size": len(before_content),
+            "after_size": len(after_content),
+            "before_line_count": len(before_content.splitlines()),
+            "after_line_count": len(after_content.splitlines()),
+            "first_changed_line": 0,
+            "summary": "文件内容未变化",
+        }
+
+    before_lines = before_content.splitlines()
+    after_lines = after_content.splitlines()
+
+    first_changed = 1
+    max_check = min(len(before_lines), len(after_lines))
+    for i in range(max_check):
+        if before_lines[i] != after_lines[i]:
+            first_changed = i + 1
+            break
+    else:
+        if len(after_lines) > len(before_lines):
+            first_changed = len(before_lines) + 1
+
+    return {
+        "changed": True,
+        "before_size": len(before_content),
+        "after_size": len(after_content),
+        "before_line_count": len(before_lines),
+        "after_line_count": len(after_lines),
+        "first_changed_line": first_changed,
+        "summary": "app.html 内容已更新",
+    }
+
+
+def _empty_change_record(skipped_reason: str) -> dict:
+    return {
+        "changed": False,
+        "before_size": 0,
+        "after_size": 0,
+        "before_line_count": 0,
+        "after_line_count": 0,
+        "first_changed_line": 0,
+        "diff_summary": skipped_reason,
+    }
+
 
 def apply_coder_output_to_project(
     coder_result: str,
@@ -64,13 +120,26 @@ def apply_coder_output_to_project(
     real_task_protocol: dict,
 ) -> dict:
     """
-    B-03: Apply Coder output to real project in a controlled manner.
+    B-03/B-04: Apply Coder output to real project in a controlled manner.
     Only allowed to modify PROJECT_ROOT/app.html when protocol is established.
     Returns dict with enabled, status, target_file, changed_files,
-    skipped_reason, safety_status, operation.
+    skipped_reason, safety_status, operation, change_record, diff_summary.
     """
     detection = workspace_info.get("detection_status", "未启用")
     safety = workspace_info.get("safety_status", "not_enabled")
+
+    def _not_enabled(enabled: bool, status: str, skipped: str, op: str = "none"):
+        return {
+            "enabled": enabled,
+            "status": status,
+            "target_file": "",
+            "changed_files": [],
+            "skipped_reason": skipped,
+            "safety_status": safety if status != "已阻止" else "blocked",
+            "operation": op,
+            "change_record": _empty_change_record(skipped),
+            "diff_summary": _empty_change_record(skipped),
+        }
 
     if detection != "已识别" or safety != "safe":
         enabled = False
@@ -83,29 +152,13 @@ def apply_coder_output_to_project(
         else:
             status = "未启用"
             skipped = "未绑定真实项目工作区"
-        return {
-            "enabled": enabled,
-            "status": status,
-            "target_file": "",
-            "changed_files": [],
-            "skipped_reason": skipped,
-            "safety_status": safety,
-            "operation": "none",
-        }
+        return _not_enabled(enabled, status, skipped)
 
     if (
         real_task_protocol.get("protocol_status") != "已建立"
         or not real_task_protocol.get("enabled")
     ):
-        return {
-            "enabled": False,
-            "status": "未启用",
-            "target_file": "",
-            "changed_files": [],
-            "skipped_reason": "真实任务协议未建立，禁止真实文件修改",
-            "safety_status": safety,
-            "operation": "none",
-        }
+        return _not_enabled(False, "未启用", "真实任务协议未建立，禁止真实文件修改")
 
     project_root = Path(workspace_info["project_root"]).resolve()
     target_file = project_root / "app.html"
@@ -121,6 +174,8 @@ def apply_coder_output_to_project(
             "skipped_reason": "目标文件不在 PROJECT_ROOT 内",
             "safety_status": "blocked",
             "operation": "blocked_path_escape",
+            "change_record": _empty_change_record("目标文件不在 PROJECT_ROOT 内"),
+            "diff_summary": _empty_change_record("目标文件不在 PROJECT_ROOT 内"),
         }
 
     if target_file.name != "app.html":
@@ -132,43 +187,68 @@ def apply_coder_output_to_project(
             "skipped_reason": "B-03 仅允许修改 app.html",
             "safety_status": "blocked",
             "operation": "blocked_wrong_filename",
+            "change_record": _empty_change_record("B-03 仅允许修改 app.html"),
+            "diff_summary": _empty_change_record("B-03 仅允许修改 app.html"),
         }
 
     if not target_file.exists():
+        skipped = "PROJECT_ROOT 下不存在 app.html，B-03 不自动创建文件"
         return {
             "enabled": True,
             "status": "跳过",
             "target_file": str(target_file),
             "changed_files": [],
-            "skipped_reason": "PROJECT_ROOT 下不存在 app.html，B-03 不自动创建文件",
+            "skipped_reason": skipped,
             "safety_status": "safe",
             "operation": "skip_missing_file",
+            "change_record": _empty_change_record(skipped),
+            "diff_summary": _empty_change_record(skipped),
         }
 
     if not target_file.is_file():
+        skipped = "目标路径不是文件"
         return {
             "enabled": True,
             "status": "跳过",
             "target_file": str(target_file),
             "changed_files": [],
-            "skipped_reason": "目标路径不是文件",
+            "skipped_reason": skipped,
             "safety_status": "safe",
             "operation": "skip_not_file",
+            "change_record": _empty_change_record(skipped),
+            "diff_summary": _empty_change_record(skipped),
         }
 
     html_code = extract_html_code(coder_result)
     if html_code is None:
+        skipped = "Coder 输出中未找到 html 代码块"
         return {
             "enabled": True,
             "status": "跳过",
             "target_file": str(target_file),
             "changed_files": [],
-            "skipped_reason": "Coder 输出中未找到 html 代码块",
+            "skipped_reason": skipped,
             "safety_status": "safe",
             "operation": "skip_no_html_code",
+            "change_record": _empty_change_record(skipped),
+            "diff_summary": _empty_change_record(skipped),
         }
 
+    # B-04: Read before content for change record
+    before_content = target_file.read_text(encoding="utf-8")
     save_text(target_file, html_code)
+    after_content = target_file.read_text(encoding="utf-8")
+
+    diff_summary = build_simple_diff_summary(before_content, after_content)
+    change_record = {
+        "changed": diff_summary["changed"],
+        "before_size": diff_summary["before_size"],
+        "after_size": diff_summary["after_size"],
+        "before_line_count": diff_summary["before_line_count"],
+        "after_line_count": diff_summary["after_line_count"],
+        "first_changed_line": diff_summary["first_changed_line"],
+        "diff_summary": diff_summary["summary"],
+    }
 
     return {
         "enabled": True,
@@ -178,6 +258,8 @@ def apply_coder_output_to_project(
         "skipped_reason": "",
         "safety_status": "safe",
         "operation": "write_app_html",
+        "change_record": change_record,
+        "diff_summary": diff_summary,
     }
 
 
@@ -1111,6 +1193,7 @@ def build_final_report(
     project_workspace_status: str,
     real_task_protocol_status: str,
     real_file_modification_status: str,
+    change_record_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -1235,6 +1318,31 @@ def build_final_report(
     else:
         real_file_modification_section = "\n## Real File Modification\n\nStatus: 未启用\n"
 
+    if project_change_record_info:
+        pcr = project_change_record_info
+        pcr_lines = [
+            f"- Status: {pcr.get('status')}",
+            f"- Target File: {pcr.get('target_file')}",
+            f"- Operation: {pcr.get('operation')}",
+            f"- Changed: {pcr.get('changed')}",
+            f"- Before Size: {pcr.get('before_size')}",
+            f"- After Size: {pcr.get('after_size')}",
+            f"- Before Line Count: {pcr.get('before_line_count')}",
+            f"- After Line Count: {pcr.get('after_line_count')}",
+            f"- First Changed Line: {pcr.get('first_changed_line')}",
+            f"- Diff Summary: {pcr.get('diff_summary')}",
+        ]
+        changed_files = pcr.get("changed_files", [])
+        if changed_files:
+            pcr_lines.append("- Changed Files:")
+            for f in changed_files:
+                pcr_lines.append(f"  - {f}")
+        else:
+            pcr_lines.append("- Changed Files: (none)")
+        change_record_section = "\n## Change Record\n\n" + "\n".join(pcr_lines) + "\n"
+    else:
+        change_record_section = "\n## Change Record\n\nStatus: 未启用\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -1273,6 +1381,7 @@ def build_final_report(
 - 项目工作区：{project_workspace_status}
 - 真实任务协议：{real_task_protocol_status}
 - 真实文件修改：{real_file_modification_status}
+- 变更记录：{change_record_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -1324,6 +1433,7 @@ def build_final_report(
 {project_workspace_section}
 {real_task_protocol_section}
 {real_file_modification_section}
+{change_record_section}
 """
 
 
@@ -1417,6 +1527,7 @@ def build_run_log(
     project_workspace_status: str,
     real_task_protocol_status: str,
     real_file_modification_status: str,
+    change_record_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1487,6 +1598,7 @@ def build_run_log(
 - 项目工作区：{project_workspace_status}
 - 真实任务协议：{real_task_protocol_status}
 - 真实文件修改：{real_file_modification_status}
+- 变更记录：{change_record_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1623,6 +1735,7 @@ def build_summary(
     project_workspace_status: str,
     real_task_protocol_status: str,
     real_file_modification_status: str,
+    change_record_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1672,6 +1785,7 @@ def build_summary(
 - 项目工作区：{project_workspace_status}
 - 真实任务协议：{real_task_protocol_status}
 - 真实文件修改：{real_file_modification_status}
+- 变更记录：{change_record_status}
 - Error：{error_text}
 """
 
@@ -1791,6 +1905,24 @@ def main():
             agent_workspace_info,
             real_task_protocol_info,
         )
+
+        # B-04: Persist change record for reporting
+        global project_change_record_info
+        project_change_record_info = real_file_modification_info.get("change_record", {})
+        if project_change_record_info:
+            project_change_record_info = {
+                "status": real_file_modification_info.get("status", "未启用"),
+                "target_file": real_file_modification_info.get("target_file", ""),
+                "operation": real_file_modification_info.get("operation", "none"),
+                "changed": project_change_record_info.get("changed", False),
+                "before_size": project_change_record_info.get("before_size", 0),
+                "after_size": project_change_record_info.get("after_size", 0),
+                "before_line_count": project_change_record_info.get("before_line_count", 0),
+                "after_line_count": project_change_record_info.get("after_line_count", 0),
+                "first_changed_line": project_change_record_info.get("first_changed_line", 0),
+                "diff_summary": project_change_record_info.get("diff_summary", ""),
+                "changed_files": real_file_modification_info.get("changed_files", []),
+            }
 
         print("========== Reviewer 正在审查代码 ==========")
         current_stage = "Reviewer"
@@ -1949,6 +2081,11 @@ DELIVERY RESULT:
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
         real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
         real_file_modification_status_value = real_file_modification_info.get("status", "未启用")
+        change_record_info = real_file_modification_info.get("change_record", {})
+        if real_file_modification_status_value == "已修改":
+            change_record_status_value = "已记录" if change_record_info.get("changed") else "无变化"
+        else:
+            change_record_status_value = real_file_modification_status_value
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -1998,6 +2135,7 @@ DELIVERY RESULT:
             project_workspace_status_value,
             real_task_protocol_status_value,
             real_file_modification_status_value,
+            change_record_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -2040,6 +2178,7 @@ DELIVERY RESULT:
             project_workspace_status_value,
             real_task_protocol_status_value,
             real_file_modification_status_value,
+            change_record_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -2082,6 +2221,7 @@ DELIVERY RESULT:
             project_workspace_status_value,
             real_task_protocol_status_value,
             real_file_modification_status_value,
+            change_record_status_value,
         )
         save_text(run_dir / "summary.md", summary)
 
@@ -2125,6 +2265,11 @@ DELIVERY RESULT:
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
         real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
         real_file_modification_status_value = real_file_modification_info.get("status", "未启用")
+        change_record_info = real_file_modification_info.get("change_record", {})
+        if real_file_modification_status_value == "已修改":
+            change_record_status_value = "已记录" if change_record_info.get("changed") else "无变化"
+        else:
+            change_record_status_value = real_file_modification_status_value
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
@@ -2169,6 +2314,7 @@ DELIVERY RESULT:
             project_workspace_status_value,
             real_task_protocol_status_value,
             real_file_modification_status_value,
+            change_record_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -2226,6 +2372,7 @@ DELIVERY RESULT:
                     project_workspace_status_value,
                     real_task_protocol_status_value,
                     real_file_modification_status_value,
+                    change_record_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
