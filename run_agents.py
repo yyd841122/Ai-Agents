@@ -214,6 +214,12 @@ project_registry_result: dict = {}
 # B-05: Project session info (global, set in main)
 project_session_info: dict = {}
 
+# B-06: Project resume entry (global, set in main)
+project_resume_entry: dict = {}
+
+# B-06: Project state write result (global, set in main)
+project_state_write_result: dict = {}
+
 
 def build_project_session_info(
     project_id: str,
@@ -261,6 +267,167 @@ def build_project_session_info(
         "session_status": "已启用" if registry_result.get("project_status") in ("已注册", "已更新") else "等待工作区",
         "reason": registry_result.get("reason", ""),
     }
+
+
+def detect_project_resume_entry(project_session_info: dict) -> dict:
+    """B-06: Detect resume entry from existing project_state.json."""
+    session_status = project_session_info.get("session_status", "未启用")
+    project_id = project_session_info.get("project_id", "")
+
+    if session_status != "已启用":
+        return {
+            "enabled": False,
+            "project_id": project_id,
+            "state_path": "",
+            "state_exists": False,
+            "resume_available": False,
+            "last_run_id": "",
+            "last_status": "",
+            "last_stage": "",
+            "resume_status": session_status,
+            "reason": "项目会话未启用，恢复入口不可用",
+        }
+
+    state_path = ROOT / "outputs" / "projects" / project_id / "project_state.json"
+
+    if not state_path.exists():
+        return {
+            "enabled": True,
+            "project_id": project_id,
+            "state_path": str(state_path),
+            "state_exists": False,
+            "resume_available": False,
+            "last_run_id": "",
+            "last_status": "",
+            "last_stage": "",
+            "resume_status": "无历史状态",
+            "reason": "未发现 project_state.json",
+        }
+
+    try:
+        data = _json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {
+            "enabled": True,
+            "project_id": project_id,
+            "state_path": str(state_path),
+            "state_exists": True,
+            "resume_available": False,
+            "last_run_id": "",
+            "last_status": "",
+            "last_stage": "",
+            "resume_status": "状态文件无效",
+            "reason": "project_state.json 无法解析",
+        }
+
+    last_status = data.get("last_status", "")
+    if last_status == "通过":
+        resume_status = "可继续"
+    elif last_status == "未通过":
+        resume_status = "可恢复"
+    else:
+        resume_status = "未知"
+
+    return {
+        "enabled": True,
+        "project_id": project_id,
+        "state_path": str(state_path),
+        "state_exists": True,
+        "resume_available": bool(data.get("resume_available", False)),
+        "last_run_id": data.get("last_run_id", ""),
+        "last_status": last_status,
+        "last_stage": data.get("last_stage", ""),
+        "resume_status": resume_status,
+        "reason": "已发现历史项目状态",
+    }
+
+
+def write_project_state(
+    project_session_info: dict,
+    run_dir: Path,
+    workflow_result: str,
+    current_stage: str,
+    resume_status: str,
+    error: Exception | None = None,
+) -> dict:
+    """B-06: Persist project_state.json after each run (success or failure)."""
+    session_status = project_session_info.get("session_status", "未启用")
+    project_id = project_session_info.get("project_id", "")
+    project_root = project_session_info.get("project_root", "")
+
+    state_path = ROOT / "outputs" / "projects" / project_id / "project_state.json"
+
+    if session_status != "已启用":
+        return {
+            "enabled": False,
+            "state_path": str(state_path) if project_id else "",
+            "write_status": "跳过",
+            "resume_available": False,
+            "last_run_id": "",
+            "last_status": "",
+            "last_stage": "",
+            "reason": "项目会话未启用，未写入项目状态",
+        }
+
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state = {
+            "project_id": project_id,
+            "project_root": project_root,
+            "last_run_id": run_dir.name if run_dir else "",
+            "last_run_dir": str(run_dir),
+            "last_status": workflow_result,
+            "last_stage": current_stage,
+            "resume_available": True,
+            "resume_status": resume_status,
+            "error": str(error) if error is not None else "",
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        state_path.write_text(
+            _json.dumps(state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return {
+            "enabled": True,
+            "state_path": str(state_path),
+            "write_status": "已写入",
+            "resume_available": True,
+            "last_run_id": state["last_run_id"],
+            "last_status": state["last_status"],
+            "last_stage": state["last_stage"],
+            "reason": "project_state.json 已写入",
+        }
+    except Exception as state_err:
+        return {
+            "enabled": True,
+            "state_path": str(state_path),
+            "write_status": "失败",
+            "resume_available": False,
+            "last_run_id": run_dir.name if run_dir else "",
+            "last_status": workflow_result,
+            "last_stage": current_stage,
+            "reason": f"project_state.json 写入失败：{state_err}",
+        }
+
+
+def build_project_resume_status(
+    session_status: str,
+    workflow_result: str,
+) -> str:
+    """B-06: Compute project resume status for reporting."""
+    if session_status == "未启用":
+        return "未启用"
+    if session_status == "无效":
+        return "无效"
+    if session_status == "等待工作区":
+        return "等待工作区"
+    if session_status != "已启用":
+        return "未知"
+    if workflow_result == "通过":
+        return "可继续"
+    if workflow_result == "未通过":
+        return "可恢复"
+    return "未知"
 
 
 def build_simple_diff_summary(before_content: str, after_content: str) -> dict:
@@ -1405,6 +1572,8 @@ def build_final_report(
     real_file_modification_status: str,
     change_record_status: str,
     project_session_status: str,
+    project_state_status: str,
+    project_resume_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -1572,6 +1741,39 @@ def build_final_report(
     else:
         project_session_section = "\n## Project Session\n\nSession Status: 未启用\n"
 
+    if project_resume_entry:
+        pre = project_resume_entry
+        pre_lines = [
+            f"- Project State Status: {project_state_write_result.get('write_status', '跳过') if project_state_write_result else '跳过'}",
+            f"- Project Resume Status: {pre.get('resume_status', '未知')}",
+            f"- State Path: {pre.get('state_path', '')}",
+            f"- State Exists: {pre.get('state_exists', False)}",
+            f"- Resume Available: {pre.get('resume_available', False)}",
+            f"- Last Run ID: {pre.get('last_run_id', '')}",
+            f"- Last Status: {pre.get('last_status', '')}",
+            f"- Last Stage: {pre.get('last_stage', '')}",
+            f"- Reason: {pre.get('reason', '')}",
+        ]
+        project_resume_section = "\n## Project Resume\n\n" + "\n".join(pre_lines) + "\n"
+    else:
+        project_resume_section = "\n## Project Resume\n\nResume Available: False\n"
+
+    if project_state_write_result:
+        pswr = project_state_write_result
+        pswr_lines = [
+            f"- Enabled: {pswr.get('enabled')}",
+            f"- State Path: {pswr.get('state_path')}",
+            f"- Write Status: {pswr.get('write_status')}",
+            f"- Resume Available: {pswr.get('resume_available')}",
+            f"- Last Run ID: {pswr.get('last_run_id', '')}",
+            f"- Last Status: {pswr.get('last_status', '')}",
+            f"- Last Stage: {pswr.get('last_stage', '')}",
+            f"- Reason: {pswr.get('reason')}",
+        ]
+        project_state_section = "\n## Project State\n\n" + "\n".join(pswr_lines) + "\n"
+    else:
+        project_state_section = "\n## Project State\n\nWrite Status: 跳过\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -1612,6 +1814,8 @@ def build_final_report(
 - 真实文件修改：{real_file_modification_status}
 - 变更记录：{change_record_status}
 - 项目会话：{project_session_status}
+- 项目状态：{project_state_status}
+- 项目恢复入口：{project_resume_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -1665,6 +1869,8 @@ def build_final_report(
 {real_file_modification_section}
 {change_record_section}
 {project_session_section}
+{project_resume_section}
+{project_state_section}
 """
 
 
@@ -1760,6 +1966,8 @@ def build_run_log(
     real_file_modification_status: str,
     change_record_status: str,
     project_session_status: str,
+    project_state_status: str,
+    project_resume_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1832,6 +2040,8 @@ def build_run_log(
 - 真实文件修改：{real_file_modification_status}
 - 变更记录：{change_record_status}
 - 项目会话：{project_session_status}
+- 项目状态：{project_state_status}
+- 项目恢复入口：{project_resume_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1970,6 +2180,8 @@ def build_summary(
     real_file_modification_status: str,
     change_record_status: str,
     project_session_status: str,
+    project_state_status: str,
+    project_resume_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2021,6 +2233,8 @@ def build_summary(
 - 真实文件修改：{real_file_modification_status}
 - 变更记录：{change_record_status}
 - 项目会话：{project_session_status}
+- 项目状态：{project_state_status}
+- 项目恢复入口：{project_resume_status}
 - Error：{error_text}
 """
 
@@ -2028,8 +2242,10 @@ def build_summary(
 def main():
     task = read_text(TASK_FILE)
 
-    # B-05: Determine project id for session isolation
-    active_project_id = PROJECT_ID if is_valid_project_id(PROJECT_ID) else ""
+    # B-05/B-06: Determine project id for session isolation
+    raw_project_id = PROJECT_ID
+    project_id_valid = is_valid_project_id(raw_project_id) if raw_project_id else False
+    active_project_id = raw_project_id if project_id_valid else ""
 
     run_dir = create_run_dir(active_project_id)
     reports_dir = run_dir / "reports"
@@ -2044,17 +2260,21 @@ def main():
     global real_task_protocol_info
     real_task_protocol_info = build_real_task_protocol(task, agent_workspace_info)
 
-    # B-05: Register or update project in registry
+    # B-05: Register or update project in registry (pass raw id to preserve invalid value)
     global project_registry_result
     project_registry_result = register_or_update_project(
-        active_project_id, agent_workspace_info, run_dir
+        raw_project_id, agent_workspace_info, run_dir
     )
 
-    # B-05: Build project session info
+    # B-05: Build project session info (uses active id for path operations)
     global project_session_info
     project_session_info = build_project_session_info(
-        active_project_id, agent_workspace_info, project_registry_result, run_dir
+        raw_project_id, agent_workspace_info, project_registry_result, run_dir
     )
+
+    # B-06: Detect project resume entry (read existing state if any)
+    global project_resume_entry
+    project_resume_entry = detect_project_resume_entry(project_session_info)
 
     current_stage = "Startup"
 
@@ -2328,6 +2548,18 @@ DELIVERY RESULT:
         failure_injection_matrix_status = "已建立"
         route_c_acceptance_status = "已通过"
         route_b_entry_baseline_status = "已冻结"
+        # B-06: Persist project_state.json before computing its status
+        resume_status = build_project_resume_status(
+            project_session_info.get("session_status", "未启用"),
+            workflow_result,
+        )
+        project_state_write_result = write_project_state(
+            project_session_info,
+            run_dir,
+            workflow_result,
+            current_stage,
+            resume_status,
+        )
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
         real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
         real_file_modification_status_value = real_file_modification_info.get("status", "未启用")
@@ -2337,6 +2569,10 @@ DELIVERY RESULT:
         else:
             change_record_status_value = real_file_modification_status_value
         project_session_status_value = project_session_info.get("session_status", "未启用")
+        project_state_status_value = project_state_write_result.get("write_status", "跳过")
+        project_resume_status_value = build_project_resume_status(
+            project_session_status_value, workflow_result
+        )
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -2388,6 +2624,8 @@ DELIVERY RESULT:
             real_file_modification_status_value,
             change_record_status_value,
             project_session_status_value,
+            project_state_status_value,
+            project_resume_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -2432,6 +2670,8 @@ DELIVERY RESULT:
             real_file_modification_status_value,
             change_record_status_value,
             project_session_status_value,
+            project_state_status_value,
+            project_resume_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -2476,29 +2716,65 @@ DELIVERY RESULT:
             real_file_modification_status_value,
             change_record_status_value,
             project_session_status_value,
+            project_state_status_value,
+            project_resume_status_value,
         )
         save_text(run_dir / "summary.md", summary)
-
         update_latest(run_dir, active_project_id)
 
-        # B-05: Persist project_state.json when session is enabled
-        if project_session_info.get("enabled") and project_session_info.get("session_status") == "已启用":
-            try:
-                state = {
-                    "project_id": project_session_info.get("project_id"),
-                    "project_root": project_session_info.get("project_root"),
-                    "last_run_id": run_dir.name,
-                    "last_run_dir": str(run_dir),
-                    "last_status": workflow_result,
-                    "last_stage": current_stage,
-                    "resume_available": True,
-                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
-                state_path = ROOT / "outputs" / "projects" / project_session_info.get("project_id") / "project_state.json"
-                state_path.parent.mkdir(parents=True, exist_ok=True)
-                state_path.write_text(_json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-            except Exception as state_err:
-                print(f"Warning: failed to write project_state.json: {state_err}")
+        final_report = build_final_report(
+            task,
+            product_result,
+            architect_result,
+            test_designer_result,
+            task_manager_result,
+            planner_result,
+            coder_result,
+            reviewer_result,
+            tester_result,
+            workflow_result,
+            tester_prd_status,
+            tester_sdd_status,
+            tester_tdd_status,
+            tester_context_status,
+            planner_sdd_status,
+            planner_tdd_status,
+            planner_tasks_status,
+            coder_sdd_status,
+            coder_tdd_status,
+            coder_scope_status,
+            reviewer_sdd_status,
+            reviewer_tdd_status,
+            reviewer_context_status,
+            sdd_generated,
+            tdd_generated,
+            tasks_generated,
+            revise_context_status,
+            revise_context,
+            delivery_context_status,
+            delivery_context,
+            documenter_status,
+            documenter_context_status,
+            documenter_result,
+            agent_call_wrapper_status,
+            model_router_status,
+            cost_record_status,
+            fallback_policy_status,
+            failure_policy_executor_status,
+            failure_capture_status,
+            failure_injection_status_value,
+            failure_injection_matrix_status,
+            route_c_acceptance_status,
+            route_b_entry_baseline_status,
+            project_workspace_status_value,
+            real_task_protocol_status_value,
+            real_file_modification_status_value,
+            change_record_status_value,
+            project_session_status_value,
+            project_state_status_value,
+            project_resume_status_value,
+        )
+        save_text(reports_dir / "final_report.md", final_report)
 
         print()
         print("========== 输出文件已保存 ==========")
@@ -2535,6 +2811,21 @@ DELIVERY RESULT:
         failure_injection_matrix_status = "已建立"
         route_c_acceptance_status = "待确认"
         route_b_entry_baseline_status = "待确认"
+
+        # B-06: Persist project_state.json (error path) FIRST
+        error_resume_status = build_project_resume_status(
+            project_session_info.get("session_status", "未启用"),
+            "未通过",
+        )
+        project_state_write_result = write_project_state(
+            project_session_info,
+            run_dir,
+            "未通过",
+            current_stage,
+            error_resume_status,
+            error=error,
+        )
+        project_state_status_value = project_state_write_result.get("write_status", "跳过")
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
         real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
         real_file_modification_status_value = real_file_modification_info.get("status", "未启用")
@@ -2544,9 +2835,13 @@ DELIVERY RESULT:
         else:
             change_record_status_value = real_file_modification_status_value
         project_session_status_value = project_session_info.get("session_status", "未启用")
+        project_resume_status_value = build_project_resume_status(
+            project_session_status_value, "未通过"
+        )
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
+        save_text(reports_dir / "run_log.md", run_log)
         save_text(reports_dir / "run_log.md", run_log)
 
         summary = build_summary(
@@ -2590,6 +2885,8 @@ DELIVERY RESULT:
             real_file_modification_status_value,
             change_record_status_value,
             project_session_status_value,
+            project_state_status_value,
+            project_resume_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -2649,6 +2946,8 @@ DELIVERY RESULT:
                     real_file_modification_status_value,
                     change_record_status_value,
                     project_session_status_value,
+                    project_state_status_value,
+                    project_resume_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
