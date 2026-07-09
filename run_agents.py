@@ -226,6 +226,9 @@ minimal_dev_loop_acceptance: dict = {}
 # B-08: Reviewer diff context status (global, set in main)
 reviewer_diff_context_status: str = "跳过"
 
+# B-09: Reviewer structured result (global, set in main)
+reviewer_structured_result: dict = {}
+
 
 def build_project_session_info(
     project_id: str,
@@ -1290,6 +1293,83 @@ def review_passed(reviewer_result: str) -> bool:
     return "通过" in lines and "不通过" not in lines
 
 
+def _extract_section(reviewer_result: str, header: str) -> str:
+    """B-09: Extract content after a section header line."""
+    lines = reviewer_result.splitlines()
+    start = -1
+    for i, line in enumerate(lines):
+        if line.strip().startswith(header):
+            start = i + 1
+            break
+    if start < 0 or start >= len(lines):
+        return ""
+    collected = []
+    for line in lines[start:]:
+        if any(line.strip().startswith(h) for h in (
+            "REVIEW_RESULT:",
+            "BLOCKING_ISSUES:",
+            "NON_BLOCKING_SUGGESTIONS:",
+            "FILES_REVIEWED:",
+            "REAL_CHANGE_ASSESSMENT:",
+            "REVISION_REQUIRED:",
+            "REVISION_INSTRUCTIONS:",
+        )):
+            break
+        collected.append(line)
+    return "\n".join(collected).strip()
+
+
+def parse_structured_reviewer_result(reviewer_result: str) -> dict:
+    """B-09: Parse Reviewer's structured output."""
+    text = reviewer_result or ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    review_result = "未知"
+    revision_required = "未知"
+    missing = []
+
+    for line in lines:
+        if line.startswith("REVIEW_RESULT:"):
+            value = line[len("REVIEW_RESULT:"):].strip()
+            if "不通过" in value:
+                review_result = "不通过"
+            elif "通过" in value:
+                review_result = "通过"
+        elif line.startswith("REVISION_REQUIRED:"):
+            value = line[len("REVISION_REQUIRED:"):].strip()
+            if value == "否" or value.startswith("否"):
+                revision_required = "否"
+            elif value == "是" or value.startswith("是"):
+                revision_required = "是"
+
+    if review_result == "未知":
+        missing.append("REVIEW_RESULT")
+    if revision_required == "未知":
+        missing.append("REVISION_REQUIRED")
+
+    if missing:
+        parsed = False
+        parse_status = "解析失败"
+        reason = f"缺少字段：{', '.join(missing)}"
+    else:
+        parsed = True
+        parse_status = "已解析"
+        reason = "结构化字段完整"
+
+    return {
+        "parsed": parsed,
+        "review_result": review_result,
+        "blocking_issues": _extract_section(text, "BLOCKING_ISSUES:"),
+        "non_blocking_suggestions": _extract_section(text, "NON_BLOCKING_SUGGESTIONS:"),
+        "files_reviewed": _extract_section(text, "FILES_REVIEWED:"),
+        "real_change_assessment": _extract_section(text, "REAL_CHANGE_ASSESSMENT:"),
+        "revision_required": revision_required,
+        "revision_instructions": _extract_section(text, "REVISION_INSTRUCTIONS:"),
+        "parse_status": parse_status,
+        "reason": reason,
+    }
+
+
 def create_run_dir(project_id: str = "") -> Path:
     if project_id and is_valid_project_id(project_id):
         runs_dir = ROOT / "outputs" / "projects" / project_id / "runs"
@@ -1589,7 +1669,32 @@ CODER OUTPUT:
 - Diff Summary 是否与任务目标一致。
 - 如果真实文件修改状态为「跳过」，需要在审查结论中说明是否仍可接受。
 - 如果真实文件修改状态为「已阻止 / 无效」，应判定不通过。
+
+========== REQUIRED OUTPUT FORMAT ==========
+
+Reviewer 必须严格按以下固定结构输出，便于下游 Tester / Revise 解析：
+
+REVIEW_RESULT: 通过 / 不通过
+
+BLOCKING_ISSUES:
+- 如果没有，写 无
+
+NON_BLOCKING_SUGGESTIONS:
+- 如果没有，写 无
+
+FILES_REVIEWED:
+- 列出 Coder 输出和真实变更涉及的文件；如果没有真实文件，写 无真实文件
+
+REAL_CHANGE_ASSESSMENT:
+- 说明真实文件修改状态、Changed Files、Diff Summary 是否与任务一致
+
+REVISION_REQUIRED: 是 / 否
+
+REVISION_INSTRUCTIONS:
+- 如果不需要修复，写 无
+- 如果需要修复，写清楚需要修复什么
 """
+
 
     return call_agent("Reviewer", user_prompt)
 
@@ -1602,6 +1707,7 @@ def run_tester(
     planner_result: str,
     coder_result: str,
     reviewer_result: str,
+    reviewer_structured_result: dict,
 ) -> str:
     user_prompt = f"""
 下面是用户原始任务：
@@ -1652,7 +1758,24 @@ CODER OUTPUT:
 REVIEWER OUTPUT:
 {reviewer_result}
 
-请你作为 Tester Agent，根据用户任务、PRD、SDD、TDD、Planner 计划、Coder 实现和 Reviewer 结论，按你的固定输出格式设计最小测试方案并给出测试结论。Tester 必须基于完整上下文验证最终结果，不仅运行测试，还需要确认需求、架构、实现和审查意见的一致性。
+========== STRUCTURED REVIEW RESULT ==========
+
+Review Result:
+{reviewer_structured_result.get("review_result", "未知")}
+
+Revision Required:
+{reviewer_structured_result.get("revision_required", "未知")}
+
+Blocking Issues:
+{reviewer_structured_result.get("blocking_issues", "")}
+
+Real Change Assessment:
+{reviewer_structured_result.get("real_change_assessment", "")}
+
+Revision Instructions:
+{reviewer_structured_result.get("revision_instructions", "")}
+
+请你作为 Tester Agent，根据用户任务、PRD、SDD、TDD、Planner 计划、Coder 实现、Reviewer 自由文本结论以及 Reviewer 结构化审查结果，按你的固定输出格式设计最小测试方案并给出测试结论。Tester 必须基于完整上下文验证最终结果，不仅运行测试，还需要确认需求、架构、实现和审查意见的一致性。
 """
 
     return call_agent("Tester", user_prompt)
@@ -1732,6 +1855,8 @@ def build_final_report(
     project_resume_status: str,
     minimal_dev_loop_status: str,
     reviewer_diff_context_status: str,
+    reviewer_structured_status: str,
+    tester_reviewer_structured_context_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -1971,6 +2096,24 @@ def build_final_report(
     rcr_lines.append(f"- Diff Summary: {pcr_disp.get('diff_summary', '')}")
     reviewer_real_change_review_section = "\n## Reviewer Real Change Review\n\n" + "\n".join(rcr_lines) + "\n"
 
+    if reviewer_structured_result:
+        rsr = reviewer_structured_result
+        rsr_lines = [
+            f"- Parsed: {rsr.get('parsed', False)}",
+            f"- Parse Status: {rsr.get('parse_status', '未知')}",
+            f"- Review Result: {rsr.get('review_result', '未知')}",
+            f"- Revision Required: {rsr.get('revision_required', '未知')}",
+            f"- Blocking Issues: {rsr.get('blocking_issues', '') or '(empty)'}",
+            f"- Non Blocking Suggestions: {rsr.get('non_blocking_suggestions', '') or '(empty)'}",
+            f"- Files Reviewed: {rsr.get('files_reviewed', '') or '(empty)'}",
+            f"- Real Change Assessment: {rsr.get('real_change_assessment', '') or '(empty)'}",
+            f"- Revision Instructions: {rsr.get('revision_instructions', '') or '(empty)'}",
+            f"- Reason: {rsr.get('reason', '')}",
+        ]
+        structured_reviewer_section = "\n## Structured Reviewer Result\n\n" + "\n".join(rsr_lines) + "\n"
+    else:
+        structured_reviewer_section = "\n## Structured Reviewer Result\n\nParse Status: 跳过\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -2015,6 +2158,8 @@ def build_final_report(
 - 项目恢复入口：{project_resume_status}
 - 真实开发最小闭环：{minimal_dev_loop_status}
 - Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
+- Reviewer 结构化审查：{reviewer_structured_status}
+- Tester 接收结构化审查结果：{tester_reviewer_structured_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -2072,6 +2217,7 @@ def build_final_report(
 {project_state_section}
 {minimal_dev_loop_section}
 {reviewer_real_change_review_section}
+{structured_reviewer_section}
 """
 
 
@@ -2171,6 +2317,8 @@ def build_run_log(
     project_resume_status: str,
     minimal_dev_loop_status: str,
     reviewer_diff_context_status: str,
+    reviewer_structured_status: str,
+    tester_reviewer_structured_context_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2247,6 +2395,8 @@ def build_run_log(
 - 项目恢复入口：{project_resume_status}
 - 真实开发最小闭环：{minimal_dev_loop_status}
 - Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
+- Reviewer 结构化审查：{reviewer_structured_status}
+- Tester 接收结构化审查结果：{tester_reviewer_structured_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -2389,6 +2539,8 @@ def build_summary(
     project_resume_status: str,
     minimal_dev_loop_status: str,
     reviewer_diff_context_status: str,
+    reviewer_structured_status: str,
+    tester_reviewer_structured_context_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2444,6 +2596,8 @@ def build_summary(
 - 项目恢复入口：{project_resume_status}
 - 真实开发最小闭环：{minimal_dev_loop_status}
 - Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
+- Reviewer 结构化审查：{reviewer_structured_status}
+- Tester 接收结构化审查结果：{tester_reviewer_structured_context_status}
 - Error：{error_text}
 """
 
@@ -2627,6 +2781,18 @@ def main():
         print(reviewer_result)
         save_text(reports_dir / "reviewer_result.md", reviewer_result)
         reviewer_sdd_status = "已接收"
+
+        # B-09: Parse structured Reviewer result
+        global reviewer_structured_result
+        reviewer_structured_result = parse_structured_reviewer_result(reviewer_result)
+        if reviewer_structured_result["parsed"]:
+            reviewer_structured_status_value = "已解析"
+        else:
+            reviewer_structured_status_value = reviewer_structured_result["parse_status"]
+        if reviewer_structured_result["parsed"]:
+            reviewer_is_passed = reviewer_structured_result["review_result"] == "通过"
+        else:
+            reviewer_is_passed = review_passed(reviewer_result)
         reviewer_tdd_status = "已接收"
         reviewer_context_status = "已接收"
         print()
@@ -2647,6 +2813,7 @@ def main():
                     planner_result,
                     coder_result,
                     reviewer_result,
+                    reviewer_structured_result,
                 )
             )
             tester_status = "完成"
@@ -2802,6 +2969,11 @@ DELIVERY RESULT:
         project_resume_status_value = build_project_resume_status(
             project_session_status_value, workflow_result
         )
+        # B-08/B-09: Test if Tester should run based on Reviewer result
+        if reviewer_is_passed:
+            tester_reviewer_structured_context_status_value = "已接收"
+        else:
+            tester_reviewer_structured_context_status_value = "跳过"
         minimal_dev_loop_status_value = minimal_dev_loop_acceptance.get("acceptance_status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
@@ -2858,6 +3030,8 @@ DELIVERY RESULT:
             project_resume_status_value,
             minimal_dev_loop_status_value,
             reviewer_diff_context_status,
+            reviewer_structured_status_value,
+            tester_reviewer_structured_context_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -2906,6 +3080,8 @@ DELIVERY RESULT:
             project_resume_status_value,
             minimal_dev_loop_status_value,
             reviewer_diff_context_status,
+            reviewer_structured_status_value,
+            tester_reviewer_structured_context_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -2954,6 +3130,8 @@ DELIVERY RESULT:
             project_resume_status_value,
             minimal_dev_loop_status_value,
             reviewer_diff_context_status,
+            reviewer_structured_status_value,
+            tester_reviewer_structured_context_status_value,
         )
         save_text(run_dir / "summary.md", summary)
         update_latest(run_dir, active_project_id)
@@ -3085,6 +3263,12 @@ DELIVERY RESULT:
         project_resume_status_value = build_project_resume_status(
             project_session_status_value, "未通过"
         )
+        if reviewer_structured_result:
+            reviewer_structured_status_value = reviewer_structured_result.get("parse_status", "跳过")
+            tester_reviewer_structured_context_status_value = "已接收" if reviewer_is_passed else "跳过"
+        else:
+            reviewer_structured_status_value = "跳过"
+            tester_reviewer_structured_context_status_value = "跳过"
         minimal_dev_loop_status_value = minimal_dev_loop_acceptance.get("acceptance_status", "未通过")
         failure_injection_status_value = failure_injection_status()
 
@@ -3137,6 +3321,8 @@ DELIVERY RESULT:
             project_resume_status_value,
             minimal_dev_loop_status_value,
             reviewer_diff_context_status,
+            reviewer_structured_status_value,
+            tester_reviewer_structured_context_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -3200,6 +3386,8 @@ DELIVERY RESULT:
                     project_resume_status_value,
                     minimal_dev_loop_status_value,
                     reviewer_diff_context_status,
+                    reviewer_structured_status_value,
+                    tester_reviewer_structured_context_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
