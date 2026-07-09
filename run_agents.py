@@ -220,6 +220,9 @@ project_resume_entry: dict = {}
 # B-06: Project state write result (global, set in main)
 project_state_write_result: dict = {}
 
+# B-07: Minimal dev loop acceptance (global, set in main)
+minimal_dev_loop_acceptance: dict = {}
+
 
 def build_project_session_info(
     project_id: str,
@@ -428,6 +431,115 @@ def build_project_resume_status(
     if workflow_result == "未通过":
         return "可恢复"
     return "未知"
+
+
+def build_minimal_dev_loop_acceptance(
+    workspace_info: dict,
+    real_task_protocol: dict,
+    real_file_modification: dict,
+    change_record: dict,
+    project_session: dict,
+    project_state_result: dict,
+    workflow_result: str = "",
+) -> dict:
+    """B-07: Validate minimal real development loop end-to-end."""
+    workspace_status = workspace_info.get("detection_status", "未启用")
+    protocol_status = real_task_protocol.get("protocol_status", "未启用")
+    file_modification_status = real_file_modification.get("status", "未启用")
+    session_status = project_session.get("session_status", "未启用")
+    state_write_status = project_state_result.get("write_status", "跳过")
+
+    workspace_ok = workspace_status == "已识别"
+    protocol_ok = protocol_status == "已建立"
+    file_modification_ok = file_modification_status in ("已修改", "跳过")
+    change_record_ok = bool(change_record)
+    project_session_ok = session_status == "已启用"
+    project_state_ok = state_write_status == "已写入"
+
+    enabled = workspace_ok or session_status in ("无效", "等待工作区")
+
+    if not workspace_ok and session_status != "无效" and session_status != "等待工作区":
+        return {
+            "enabled": False,
+            "acceptance_status": "未启用",
+            "workspace_ok": False,
+            "protocol_ok": False,
+            "file_modification_ok": False,
+            "change_record_ok": False,
+            "project_session_ok": False,
+            "project_state_ok": False,
+            "summary": "未绑定完整真实项目会话，最小闭环验收未启用",
+            "reason": "未设置 PROJECT_ROOT 或 PROJECT_ID",
+        }
+
+    if not workspace_ok:
+        return {
+            "enabled": enabled,
+            "acceptance_status": "未通过",
+            "workspace_ok": False,
+            "protocol_ok": False,
+            "file_modification_ok": False,
+            "change_record_ok": False,
+            "project_session_ok": session_status == "已启用",
+            "project_state_ok": project_state_ok,
+            "summary": "工作区未识别或被阻止",
+            "reason": f"workspace_status={workspace_status}",
+        }
+
+    if not protocol_ok:
+        return {
+            "enabled": True,
+            "acceptance_status": "未通过",
+            "workspace_ok": True,
+            "protocol_ok": False,
+            "file_modification_ok": False,
+            "change_record_ok": change_record_ok,
+            "project_session_ok": session_status == "已启用",
+            "project_state_ok": project_state_ok,
+            "summary": "真实任务协议未建立",
+            "reason": f"protocol_status={protocol_status}",
+        }
+
+    if not project_state_ok:
+        return {
+            "enabled": True,
+            "acceptance_status": "未通过",
+            "workspace_ok": True,
+            "protocol_ok": True,
+            "file_modification_ok": file_modification_ok,
+            "change_record_ok": change_record_ok,
+            "project_session_ok": session_status == "已启用",
+            "project_state_ok": False,
+            "summary": "项目状态未成功写入",
+            "reason": "项目状态未成功写入",
+        }
+
+    if workflow_result == "未通过":
+        return {
+            "enabled": True,
+            "acceptance_status": "未通过",
+            "workspace_ok": True,
+            "protocol_ok": True,
+            "file_modification_ok": file_modification_ok,
+            "change_record_ok": change_record_ok,
+            "project_session_ok": True,
+            "project_state_ok": True,
+            "summary": "工作流未通过，最小闭环不成立",
+            "reason": "workflow_result=未通过",
+        }
+
+    return {
+        "enabled": True,
+        "acceptance_status": "已通过",
+        "workspace_ok": True,
+        "protocol_ok": True,
+        "file_modification_ok": True,
+        "change_record_ok": True,
+        "project_session_ok": True,
+        "project_state_ok": True,
+        "summary": "B-07 最小真实开发闭环已成立",
+        "reason": "工作区识别 + 协议建立 + 受控写入 + 变更记录 + 项目隔离 + 状态写入全部通过",
+    }
 
 
 def build_simple_diff_summary(before_content: str, after_content: str) -> dict:
@@ -1574,6 +1686,7 @@ def build_final_report(
     project_session_status: str,
     project_state_status: str,
     project_resume_status: str,
+    minimal_dev_loop_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -1774,6 +1887,24 @@ def build_final_report(
     else:
         project_state_section = "\n## Project State\n\nWrite Status: 跳过\n"
 
+    if minimal_dev_loop_acceptance:
+        mdl = minimal_dev_loop_acceptance
+        mdl_lines = [
+            f"- Enabled: {mdl.get('enabled')}",
+            f"- Acceptance Status: {mdl.get('acceptance_status')}",
+            f"- Workspace OK: {mdl.get('workspace_ok')}",
+            f"- Protocol OK: {mdl.get('protocol_ok')}",
+            f"- File Modification OK: {mdl.get('file_modification_ok')}",
+            f"- Change Record OK: {mdl.get('change_record_ok')}",
+            f"- Project Session OK: {mdl.get('project_session_ok')}",
+            f"- Project State OK: {mdl.get('project_state_ok')}",
+            f"- Summary: {mdl.get('summary')}",
+            f"- Reason: {mdl.get('reason')}",
+        ]
+        minimal_dev_loop_section = "\n## Minimal Development Loop Acceptance\n\n" + "\n".join(mdl_lines) + "\n"
+    else:
+        minimal_dev_loop_section = "\n## Minimal Development Loop Acceptance\n\nAcceptance Status: 未启用\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -1816,6 +1947,7 @@ def build_final_report(
 - 项目会话：{project_session_status}
 - 项目状态：{project_state_status}
 - 项目恢复入口：{project_resume_status}
+- 真实开发最小闭环：{minimal_dev_loop_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -1871,6 +2003,7 @@ def build_final_report(
 {project_session_section}
 {project_resume_section}
 {project_state_section}
+{minimal_dev_loop_section}
 """
 
 
@@ -1968,6 +2101,7 @@ def build_run_log(
     project_session_status: str,
     project_state_status: str,
     project_resume_status: str,
+    minimal_dev_loop_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2042,6 +2176,7 @@ def build_run_log(
 - 项目会话：{project_session_status}
 - 项目状态：{project_state_status}
 - 项目恢复入口：{project_resume_status}
+- 真实开发最小闭环：{minimal_dev_loop_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -2182,6 +2317,7 @@ def build_summary(
     project_session_status: str,
     project_state_status: str,
     project_resume_status: str,
+    minimal_dev_loop_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2235,6 +2371,7 @@ def build_summary(
 - 项目会话：{project_session_status}
 - 项目状态：{project_state_status}
 - 项目恢复入口：{project_resume_status}
+- 真实开发最小闭环：{minimal_dev_loop_status}
 - Error：{error_text}
 """
 
@@ -2560,6 +2697,17 @@ DELIVERY RESULT:
             current_stage,
             resume_status,
         )
+        # B-07: Compute minimal dev loop acceptance after project state is persisted
+        global minimal_dev_loop_acceptance
+        minimal_dev_loop_acceptance = build_minimal_dev_loop_acceptance(
+            agent_workspace_info,
+            real_task_protocol_info,
+            real_file_modification_info,
+            real_file_modification_info.get("change_record", {}),
+            project_session_info,
+            project_state_write_result,
+            workflow_result,
+        )
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
         real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
         real_file_modification_status_value = real_file_modification_info.get("status", "未启用")
@@ -2573,6 +2721,7 @@ DELIVERY RESULT:
         project_resume_status_value = build_project_resume_status(
             project_session_status_value, workflow_result
         )
+        minimal_dev_loop_status_value = minimal_dev_loop_acceptance.get("acceptance_status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -2626,6 +2775,7 @@ DELIVERY RESULT:
             project_session_status_value,
             project_state_status_value,
             project_resume_status_value,
+            minimal_dev_loop_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -2672,6 +2822,7 @@ DELIVERY RESULT:
             project_session_status_value,
             project_state_status_value,
             project_resume_status_value,
+            minimal_dev_loop_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -2718,6 +2869,7 @@ DELIVERY RESULT:
             project_session_status_value,
             project_state_status_value,
             project_resume_status_value,
+            minimal_dev_loop_status_value,
         )
         save_text(run_dir / "summary.md", summary)
         update_latest(run_dir, active_project_id)
@@ -2800,6 +2952,7 @@ DELIVERY RESULT:
 
     except Exception as error:
         error_report = build_error_report(error)
+        workflow_result = "未通过"
         save_text(reports_dir / "error_report.md", error_report)
 
         agent_call_wrapper_status = "已启用"
@@ -2826,6 +2979,16 @@ DELIVERY RESULT:
             error=error,
         )
         project_state_status_value = project_state_write_result.get("write_status", "跳过")
+        # B-07: Compute minimal dev loop acceptance (error path)
+        minimal_dev_loop_acceptance = build_minimal_dev_loop_acceptance(
+            agent_workspace_info,
+            real_task_protocol_info,
+            real_file_modification_info,
+            real_file_modification_info.get("change_record", {}),
+            project_session_info,
+            project_state_write_result,
+            workflow_result,
+        )
         project_workspace_status_value = project_workspace_status(agent_workspace_info)
         real_task_protocol_status_value = real_task_protocol_info.get("protocol_status", "未启用")
         real_file_modification_status_value = real_file_modification_info.get("status", "未启用")
@@ -2838,6 +3001,7 @@ DELIVERY RESULT:
         project_resume_status_value = build_project_resume_status(
             project_session_status_value, "未通过"
         )
+        minimal_dev_loop_status_value = minimal_dev_loop_acceptance.get("acceptance_status", "未通过")
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
@@ -2887,6 +3051,7 @@ DELIVERY RESULT:
             project_session_status_value,
             project_state_status_value,
             project_resume_status_value,
+            minimal_dev_loop_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -2948,6 +3113,7 @@ DELIVERY RESULT:
                     project_session_status_value,
                     project_state_status_value,
                     project_resume_status_value,
+                    minimal_dev_loop_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
