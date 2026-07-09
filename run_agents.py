@@ -223,6 +223,9 @@ project_state_write_result: dict = {}
 # B-07: Minimal dev loop acceptance (global, set in main)
 minimal_dev_loop_acceptance: dict = {}
 
+# B-08: Reviewer diff context status (global, set in main)
+reviewer_diff_context_status: str = "跳过"
+
 
 def build_project_session_info(
     project_id: str,
@@ -1501,7 +1504,37 @@ def run_reviewer(
     test_designer_result: str,
     planner_result: str,
     coder_result: str,
+    project_change_record: dict,
+    real_file_modification: dict,
 ) -> str:
+    rfm = real_file_modification or {}
+    pcr = project_change_record or {}
+
+    change_context_lines = []
+    change_context_lines.append("REAL FILE MODIFICATION:")
+    change_context_lines.append(f"  Status: {rfm.get('status', '未知')}")
+    change_context_lines.append(f"  Target File: {rfm.get('target_file', '')}")
+    change_context_lines.append(f"  Operation: {rfm.get('operation', '未知')}")
+    change_files = rfm.get("changed_files") or []
+    if change_files:
+        change_context_lines.append("  Changed Files:")
+        for f in change_files:
+            change_context_lines.append(f"    - {f}")
+    else:
+        change_context_lines.append("  Changed Files: (none)")
+    change_context_lines.append("")
+    change_context_lines.append("CHANGE RECORD:")
+    change_context_lines.append(f"  Status: {pcr.get('status', '未知')}")
+    change_context_lines.append(f"  Changed: {pcr.get('changed', False)}")
+    change_context_lines.append(f"  Before Size: {pcr.get('before_size', 0)}")
+    change_context_lines.append(f"  After Size: {pcr.get('after_size', 0)}")
+    change_context_lines.append(f"  Before Line Count: {pcr.get('before_line_count', 0)}")
+    change_context_lines.append(f"  After Line Count: {pcr.get('after_line_count', 0)}")
+    change_context_lines.append(f"  First Changed Line: {pcr.get('first_changed_line', 0)}")
+    change_context_lines.append(f"  Diff Summary: {pcr.get('diff_summary', '')}")
+
+    change_context_block = "\n".join(change_context_lines)
+
     user_prompt = f"""
 下面是用户原始任务：
 
@@ -1544,7 +1577,18 @@ TASK SCOPE:
 CODER OUTPUT:
 {coder_result}
 
-请你作为 Reviewer Agent，基于用户原始任务、PRD、SDD、TDD、Planner 计划和 Coder 实现进行代码审查。Reviewer 必须基于完整上下文进行代码审查，不仅检查代码结果，还需要验证实现是否符合需求、架构和测试设计。
+========== REAL CHANGE CONTEXT ==========
+
+{change_context_block}
+
+请你作为 Reviewer Agent，基于用户原始任务、PRD、SDD、TDD、Planner 计划、Coder 实现以及真实项目变更记录进行代码审查。Reviewer 不仅要审查 Coder 输出，还必须审查真实文件修改与变更记录：
+
+- Coder 输出是否符合 PRD / SDD / TDD。
+- 真实文件修改是否发生在允许范围内（仅 PROJECT_ROOT 内单个 app.html）。
+- Changed Files 是否只包含允许文件。
+- Diff Summary 是否与任务目标一致。
+- 如果真实文件修改状态为「跳过」，需要在审查结论中说明是否仍可接受。
+- 如果真实文件修改状态为「已阻止 / 无效」，应判定不通过。
 """
 
     return call_agent("Reviewer", user_prompt)
@@ -1687,6 +1731,7 @@ def build_final_report(
     project_state_status: str,
     project_resume_status: str,
     minimal_dev_loop_status: str,
+    reviewer_diff_context_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -1905,6 +1950,27 @@ def build_final_report(
     else:
         minimal_dev_loop_section = "\n## Minimal Development Loop Acceptance\n\nAcceptance Status: 未启用\n"
 
+    # B-08: Reviewer Real Change Review section
+    rfm_disp = real_file_modification_info or {}
+    pcr_disp = project_change_record_info or {}
+    rcr_lines = [
+        f"- Reviewer Diff Context Status: {reviewer_diff_context_status}",
+        f"- Real File Modification Status: {rfm_disp.get('status', '未知')}",
+        f"- Target File: {rfm_disp.get('target_file', '')}",
+        f"- Operation: {rfm_disp.get('operation', '未知')}",
+    ]
+    rfm_changed = rfm_disp.get("changed_files") or []
+    if rfm_changed:
+        rcr_lines.append("- Changed Files:")
+        for f in rfm_changed:
+            rcr_lines.append(f"  - {f}")
+    else:
+        rcr_lines.append("- Changed Files: (none)")
+    rcr_lines.append(f"- Change Record Status: {pcr_disp.get('status', '未知')}")
+    rcr_lines.append(f"- Changed: {pcr_disp.get('changed', False)}")
+    rcr_lines.append(f"- Diff Summary: {pcr_disp.get('diff_summary', '')}")
+    reviewer_real_change_review_section = "\n## Reviewer Real Change Review\n\n" + "\n".join(rcr_lines) + "\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -1948,6 +2014,7 @@ def build_final_report(
 - 项目状态：{project_state_status}
 - 项目恢复入口：{project_resume_status}
 - 真实开发最小闭环：{minimal_dev_loop_status}
+- Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -2004,6 +2071,7 @@ def build_final_report(
 {project_resume_section}
 {project_state_section}
 {minimal_dev_loop_section}
+{reviewer_real_change_review_section}
 """
 
 
@@ -2102,6 +2170,7 @@ def build_run_log(
     project_state_status: str,
     project_resume_status: str,
     minimal_dev_loop_status: str,
+    reviewer_diff_context_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2177,6 +2246,7 @@ def build_run_log(
 - 项目状态：{project_state_status}
 - 项目恢复入口：{project_resume_status}
 - 真实开发最小闭环：{minimal_dev_loop_status}
+- Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -2318,6 +2388,7 @@ def build_summary(
     project_state_status: str,
     project_resume_status: str,
     minimal_dev_loop_status: str,
+    reviewer_diff_context_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2372,6 +2443,7 @@ def build_summary(
 - 项目状态：{project_state_status}
 - 项目恢复入口：{project_resume_status}
 - 真实开发最小闭环：{minimal_dev_loop_status}
+- Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
 - Error：{error_text}
 """
 
@@ -2531,6 +2603,13 @@ def main():
                 "changed_files": real_file_modification_info.get("changed_files", []),
             }
 
+        # B-08: Compute reviewer diff context status before calling Reviewer
+        global reviewer_diff_context_status
+        if project_change_record_info:
+            reviewer_diff_context_status = "已接收"
+        else:
+            reviewer_diff_context_status = "未提供"
+
         print("========== Reviewer 正在审查代码 ==========")
         current_stage = "Reviewer"
         reviewer_result = remove_think(
@@ -2541,6 +2620,8 @@ def main():
                 test_designer_result,
                 planner_result,
                 coder_result,
+                project_change_record_info,
+                real_file_modification_info,
             )
         )
         print(reviewer_result)
@@ -2776,6 +2857,7 @@ DELIVERY RESULT:
             project_state_status_value,
             project_resume_status_value,
             minimal_dev_loop_status_value,
+            reviewer_diff_context_status,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -2823,6 +2905,7 @@ DELIVERY RESULT:
             project_state_status_value,
             project_resume_status_value,
             minimal_dev_loop_status_value,
+            reviewer_diff_context_status,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -2870,6 +2953,7 @@ DELIVERY RESULT:
             project_state_status_value,
             project_resume_status_value,
             minimal_dev_loop_status_value,
+            reviewer_diff_context_status,
         )
         save_text(run_dir / "summary.md", summary)
         update_latest(run_dir, active_project_id)
@@ -3052,6 +3136,7 @@ DELIVERY RESULT:
             project_state_status_value,
             project_resume_status_value,
             minimal_dev_loop_status_value,
+            reviewer_diff_context_status,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -3114,6 +3199,7 @@ DELIVERY RESULT:
                     project_state_status_value,
                     project_resume_status_value,
                     minimal_dev_loop_status_value,
+                    reviewer_diff_context_status,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
