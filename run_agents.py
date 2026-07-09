@@ -1,5 +1,6 @@
 import os
 import shutil
+import json as _json
 from datetime import datetime
 from pathlib import Path
 
@@ -48,6 +49,153 @@ FAIL_AGENT = os.getenv("FAIL_AGENT", "").strip()
 # Real Project Workspace Switch: project root path (default: disabled)
 PROJECT_ROOT = os.getenv("PROJECT_ROOT", "").strip()
 
+# B-05: Project Registry Switch: project id (default: disabled)
+PROJECT_ID = os.getenv("PROJECT_ID", "").strip()
+
+# B-05: Project registry path
+PROJECTS_DIR = ROOT / "projects"
+REGISTRY_FILE = PROJECTS_DIR / "registry.json"
+import re as _re
+_VALID_PROJECT_ID_PATTERN = _re.compile(r"^[A-Za-z0-9_\-]+$")
+
+
+def is_valid_project_id(project_id: str) -> bool:
+    if not project_id:
+        return False
+    if "/" in project_id or "\\" in project_id or ".." in project_id:
+        return False
+    if _re.search(r"\s", project_id):
+        return False
+    return bool(_VALID_PROJECT_ID_PATTERN.match(project_id))
+
+
+def load_project_registry() -> dict:
+    """B-05: Load registry.json; create empty if missing; preserve on corruption."""
+    if not REGISTRY_FILE.exists():
+        return {"projects": {}}
+    try:
+        content = REGISTRY_FILE.read_text(encoding="utf-8")
+        if not content.strip():
+            return {"projects": {}}
+        data = _json.loads(content)
+        if not isinstance(data, dict):
+            return {"projects": {}}
+        if "projects" not in data or not isinstance(data["projects"], dict):
+            data["projects"] = {}
+        return data
+    except Exception:
+        return {"__corrupted__": True}
+
+
+def save_project_registry(registry: dict) -> None:
+    """B-05: Persist registry.json atomically."""
+    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = REGISTRY_FILE.with_suffix(".json.tmp")
+    tmp.write_text(_json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(REGISTRY_FILE)
+
+
+def register_or_update_project(
+    project_id: str,
+    workspace_info: dict,
+    run_dir: Path,
+) -> dict:
+    """B-05: Register or update a project entry in registry.json."""
+    if not project_id:
+        return {
+            "enabled": False,
+            "project_id": "",
+            "registry_status": "未启用",
+            "project_status": "未启用",
+            "project_root": "",
+            "created": False,
+            "updated": False,
+            "last_run_id": "",
+            "reason": "PROJECT_ID 未设置，项目注册未启用",
+        }
+    if not is_valid_project_id(project_id):
+        return {
+            "enabled": False,
+            "project_id": project_id,
+            "registry_status": "无效",
+            "project_status": "无效",
+            "project_root": "",
+            "created": False,
+            "updated": False,
+            "last_run_id": "",
+            "reason": "PROJECT_ID 非法",
+        }
+
+    detection = workspace_info.get("detection_status", "未启用")
+    if detection != "已识别":
+        return {
+            "enabled": True,
+            "project_id": project_id,
+            "registry_status": "跳过",
+            "project_status": "等待工作区",
+            "project_root": "",
+            "created": False,
+            "updated": False,
+            "last_run_id": "",
+            "reason": "PROJECT_ROOT 未识别，暂不注册项目",
+        }
+
+    project_root = workspace_info.get("project_root", "")
+
+    registry = load_project_registry()
+    if registry.get("__corrupted__"):
+        return {
+            "enabled": True,
+            "project_id": project_id,
+            "registry_status": "无效",
+            "project_status": "注册表无效",
+            "project_root": project_root,
+            "created": False,
+            "updated": False,
+            "last_run_id": "",
+            "reason": "registry.json 已损坏，未覆盖",
+        }
+
+    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    existing = registry["projects"].get(project_id)
+    run_id = run_dir.name if run_dir else ""
+
+    created = False
+    updated = False
+    if existing is None:
+        registry["projects"][project_id] = {
+            "project_id": project_id,
+            "project_root": project_root,
+            "status": "active",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "last_run_id": run_id,
+        }
+        created = True
+        project_status = "已注册"
+    else:
+        existing["project_root"] = project_root
+        existing["updated_at"] = now_iso
+        existing["last_run_id"] = run_id
+        existing["status"] = "active"
+        registry["projects"][project_id] = existing
+        updated = True
+        project_status = "已更新"
+
+    save_project_registry(registry)
+
+    return {
+        "enabled": True,
+        "project_id": project_id,
+        "registry_status": "已记录",
+        "project_status": project_status,
+        "project_root": project_root,
+        "created": created,
+        "updated": updated,
+        "last_run_id": run_id,
+        "reason": "项目注册已写入 registry.json",
+    }
+
 # B-01: Real project workspace info (global, set in main)
 agent_workspace_info: dict = {}
 
@@ -60,10 +208,63 @@ real_file_modification_info: dict = {}
 # B-04: Project change record (global, set in main)
 project_change_record_info: dict = {}
 
+# B-05: Project registry result (global, set in main)
+project_registry_result: dict = {}
+
+# B-05: Project session info (global, set in main)
+project_session_info: dict = {}
+
+
+def build_project_session_info(
+    project_id: str,
+    workspace_info: dict,
+    registry_result: dict,
+    run_dir: Path,
+) -> dict:
+    """B-05: Build project session info for reporting."""
+    if not project_id:
+        return {
+            "enabled": False,
+            "project_id": "",
+            "project_root": "",
+            "run_dir": str(run_dir),
+            "project_latest_dir": "",
+            "global_latest_dir": str(OUTPUT_DIR / "latest"),
+            "registry_status": "未启用",
+            "project_status": "未启用",
+            "session_status": "未启用",
+            "reason": "PROJECT_ID 未设置",
+        }
+    if not is_valid_project_id(project_id):
+        return {
+            "enabled": False,
+            "project_id": project_id,
+            "project_root": "",
+            "run_dir": str(run_dir),
+            "project_latest_dir": "",
+            "global_latest_dir": str(OUTPUT_DIR / "latest"),
+            "registry_status": "无效",
+            "project_status": "无效",
+            "session_status": "无效",
+            "reason": "PROJECT_ID 非法",
+        }
+    project_latest_dir = ROOT / "outputs" / "projects" / project_id / "latest"
+    return {
+        "enabled": True,
+        "project_id": project_id,
+        "project_root": registry_result.get("project_root", ""),
+        "run_dir": str(run_dir),
+        "project_latest_dir": str(project_latest_dir),
+        "global_latest_dir": str(OUTPUT_DIR / "latest"),
+        "registry_status": registry_result.get("registry_status", "未启用"),
+        "project_status": registry_result.get("project_status", "未启用"),
+        "session_status": "已启用" if registry_result.get("project_status") in ("已注册", "已更新") else "等待工作区",
+        "reason": registry_result.get("reason", ""),
+    }
+
 
 def build_simple_diff_summary(before_content: str, after_content: str) -> dict:
-    """
-    B-04: Build a simple diff summary for a single file.
+    """B-04: Build a simple diff summary for a single file.
     Returns dict with changed, before_size, after_size,
     before_line_count, after_line_count, first_changed_line, summary.
     """
@@ -807,8 +1008,11 @@ def review_passed(reviewer_result: str) -> bool:
     return "通过" in lines and "不通过" not in lines
 
 
-def create_run_dir() -> Path:
-    runs_dir = OUTPUT_DIR / "runs"
+def create_run_dir(project_id: str = "") -> Path:
+    if project_id and is_valid_project_id(project_id):
+        runs_dir = ROOT / "outputs" / "projects" / project_id / "runs"
+    else:
+        runs_dir = OUTPUT_DIR / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     existing_numbers = []
@@ -825,13 +1029,19 @@ def create_run_dir() -> Path:
     return runs_dir / run_name
 
 
-def update_latest(run_dir: Path) -> None:
+def update_latest(run_dir: Path, project_id: str = "") -> None:
     latest_dir = OUTPUT_DIR / "latest"
 
     if latest_dir.exists():
         shutil.rmtree(latest_dir)
 
     shutil.copytree(run_dir, latest_dir)
+
+    if project_id and is_valid_project_id(project_id):
+        project_latest = ROOT / "outputs" / "projects" / project_id / "latest"
+        if project_latest.exists():
+            shutil.rmtree(project_latest)
+        shutil.copytree(run_dir, project_latest)
 
 
 def extract_html_code(markdown_text: str) -> str | None:
@@ -1194,6 +1404,7 @@ def build_final_report(
     real_task_protocol_status: str,
     real_file_modification_status: str,
     change_record_status: str,
+    project_session_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -1343,6 +1554,24 @@ def build_final_report(
     else:
         change_record_section = "\n## Change Record\n\nStatus: 未启用\n"
 
+    if project_session_info:
+        psi = project_session_info
+        psi_lines = [
+            f"- Enabled: {psi.get('enabled')}",
+            f"- Project ID: {psi.get('project_id')}",
+            f"- Project Root: {psi.get('project_root')}",
+            f"- Run Directory: {psi.get('run_dir')}",
+            f"- Project Latest Directory: {psi.get('project_latest_dir')}",
+            f"- Global Latest Directory: {psi.get('global_latest_dir')}",
+            f"- Registry Status: {psi.get('registry_status')}",
+            f"- Project Status: {psi.get('project_status')}",
+            f"- Session Status: {psi.get('session_status')}",
+            f"- Reason: {psi.get('reason')}",
+        ]
+        project_session_section = "\n## Project Session\n\n" + "\n".join(psi_lines) + "\n"
+    else:
+        project_session_section = "\n## Project Session\n\nSession Status: 未启用\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -1382,6 +1611,7 @@ def build_final_report(
 - 真实任务协议：{real_task_protocol_status}
 - 真实文件修改：{real_file_modification_status}
 - 变更记录：{change_record_status}
+- 项目会话：{project_session_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -1434,6 +1664,7 @@ def build_final_report(
 {real_task_protocol_section}
 {real_file_modification_section}
 {change_record_section}
+{project_session_section}
 """
 
 
@@ -1528,6 +1759,7 @@ def build_run_log(
     real_task_protocol_status: str,
     real_file_modification_status: str,
     change_record_status: str,
+    project_session_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1599,6 +1831,7 @@ def build_run_log(
 - 真实任务协议：{real_task_protocol_status}
 - 真实文件修改：{real_file_modification_status}
 - 变更记录：{change_record_status}
+- 项目会话：{project_session_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -1736,6 +1969,7 @@ def build_summary(
     real_task_protocol_status: str,
     real_file_modification_status: str,
     change_record_status: str,
+    project_session_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -1786,6 +2020,7 @@ def build_summary(
 - 真实任务协议：{real_task_protocol_status}
 - 真实文件修改：{real_file_modification_status}
 - 变更记录：{change_record_status}
+- 项目会话：{project_session_status}
 - Error：{error_text}
 """
 
@@ -1793,7 +2028,10 @@ def build_summary(
 def main():
     task = read_text(TASK_FILE)
 
-    run_dir = create_run_dir()
+    # B-05: Determine project id for session isolation
+    active_project_id = PROJECT_ID if is_valid_project_id(PROJECT_ID) else ""
+
+    run_dir = create_run_dir(active_project_id)
     reports_dir = run_dir / "reports"
     artifacts_dir = run_dir / "artifacts"
     docs_dir = run_dir / "docs"
@@ -1805,6 +2043,18 @@ def main():
     # B-02: Build real task protocol
     global real_task_protocol_info
     real_task_protocol_info = build_real_task_protocol(task, agent_workspace_info)
+
+    # B-05: Register or update project in registry
+    global project_registry_result
+    project_registry_result = register_or_update_project(
+        active_project_id, agent_workspace_info, run_dir
+    )
+
+    # B-05: Build project session info
+    global project_session_info
+    project_session_info = build_project_session_info(
+        active_project_id, agent_workspace_info, project_registry_result, run_dir
+    )
 
     current_stage = "Startup"
 
@@ -2086,6 +2336,7 @@ DELIVERY RESULT:
             change_record_status_value = "已记录" if change_record_info.get("changed") else "无变化"
         else:
             change_record_status_value = real_file_modification_status_value
+        project_session_status_value = project_session_info.get("session_status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
         final_report = build_final_report(
@@ -2136,6 +2387,7 @@ DELIVERY RESULT:
             real_task_protocol_status_value,
             real_file_modification_status_value,
             change_record_status_value,
+            project_session_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -2179,6 +2431,7 @@ DELIVERY RESULT:
             real_task_protocol_status_value,
             real_file_modification_status_value,
             change_record_status_value,
+            project_session_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -2222,10 +2475,30 @@ DELIVERY RESULT:
             real_task_protocol_status_value,
             real_file_modification_status_value,
             change_record_status_value,
+            project_session_status_value,
         )
         save_text(run_dir / "summary.md", summary)
 
-        update_latest(run_dir)
+        update_latest(run_dir, active_project_id)
+
+        # B-05: Persist project_state.json when session is enabled
+        if project_session_info.get("enabled") and project_session_info.get("session_status") == "已启用":
+            try:
+                state = {
+                    "project_id": project_session_info.get("project_id"),
+                    "project_root": project_session_info.get("project_root"),
+                    "last_run_id": run_dir.name,
+                    "last_run_dir": str(run_dir),
+                    "last_status": workflow_result,
+                    "last_stage": current_stage,
+                    "resume_available": True,
+                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                state_path = ROOT / "outputs" / "projects" / project_session_info.get("project_id") / "project_state.json"
+                state_path.parent.mkdir(parents=True, exist_ok=True)
+                state_path.write_text(_json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception as state_err:
+                print(f"Warning: failed to write project_state.json: {state_err}")
 
         print()
         print("========== 输出文件已保存 ==========")
@@ -2270,6 +2543,7 @@ DELIVERY RESULT:
             change_record_status_value = "已记录" if change_record_info.get("changed") else "无变化"
         else:
             change_record_status_value = real_file_modification_status_value
+        project_session_status_value = project_session_info.get("session_status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
         run_log = build_error_run_log(run_dir, error, current_stage)
@@ -2315,6 +2589,7 @@ DELIVERY RESULT:
             real_task_protocol_status_value,
             real_file_modification_status_value,
             change_record_status_value,
+            project_session_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -2373,12 +2648,13 @@ DELIVERY RESULT:
                     real_task_protocol_status_value,
                     real_file_modification_status_value,
                     change_record_status_value,
+                    project_session_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
             print(f"Warning: failed to generate final_report on error path: {fe}")
 
-        update_latest(run_dir)
+        update_latest(run_dir, active_project_id)
 
         print()
         print("========== 运行失败 ==========")
