@@ -1,6 +1,7 @@
 import os
 import shutil
 import json as _json
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -45,6 +46,9 @@ MINIMAX_BASE_URL = os.getenv(
 
 # Failure Injection Switch: target agent name (default: disabled)
 FAIL_AGENT = os.getenv("FAIL_AGENT", "").strip()
+
+# B-10: Tester real command switch (default: disabled)
+TEST_COMMAND = os.getenv("TEST_COMMAND", "").strip()
 
 # Real Project Workspace Switch: project root path (default: disabled)
 PROJECT_ROOT = os.getenv("PROJECT_ROOT", "").strip()
@@ -228,6 +232,9 @@ reviewer_diff_context_status: str = "跳过"
 
 # B-09: Reviewer structured result (global, set in main)
 reviewer_structured_result: dict = {}
+
+# B-10: Real test command result (global, set in main)
+real_test_command_result: dict = {}
 
 
 def build_project_session_info(
@@ -1370,6 +1377,255 @@ def parse_structured_reviewer_result(reviewer_result: str) -> dict:
     }
 
 
+_ALLOWED_TEST_COMMANDS = {
+    "check_app_html",
+    "python_compile",
+    "node_version",
+    "npm_version",
+}
+
+
+def is_allowed_test_command(command: str) -> tuple:
+    """B-10: Whitelist check for TEST_COMMAND."""
+    if not command:
+        return False, "TEST_COMMAND 未设置"
+    if command not in _ALLOWED_TEST_COMMANDS:
+        return False, "TEST_COMMAND 不在白名单内"
+    return True, "TEST_COMMAND 在白名单内"
+
+
+def build_test_command_args(command: str, project_root: Path):
+    """B-10: Map whitelisted command to subprocess args."""
+    if command == "check_app_html":
+        return {
+            "enabled": True,
+            "command_name": "check_app_html",
+            "args": [],
+            "cwd": str(project_root),
+            "shell": False,
+            "reason": "检查 PROJECT_ROOT/app.html 是否存在",
+        }
+    if command == "python_compile":
+        return {
+            "enabled": True,
+            "command_name": "python_compile",
+            "args": ["-m", "py_compile", "run_agents.py"],
+            "cwd": str(ROOT),
+            "shell": False,
+            "reason": "平台自身语法检查",
+        }
+    if command == "node_version":
+        return {
+            "enabled": True,
+            "command_name": "node_version",
+            "args": ["--version"],
+            "cwd": str(project_root),
+            "shell": False,
+            "reason": "检查 Node 版本",
+        }
+    if command == "npm_version":
+        return {
+            "enabled": True,
+            "command_name": "npm_version",
+            "args": ["--version"],
+            "cwd": str(project_root),
+            "shell": False,
+            "reason": "检查 npm 版本",
+        }
+    return {
+        "enabled": False,
+        "command_name": command,
+        "args": [],
+        "cwd": "",
+        "shell": False,
+        "reason": "未映射的命令",
+    }
+
+
+def execute_real_test_command(test_command: str, workspace_info: dict) -> dict:
+    """B-10: Execute whitelisted real test command in a controlled way."""
+    if not test_command:
+        return {
+            "enabled": False,
+            "command_name": "",
+            "execution_status": "未启用",
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "",
+            "cwd": "",
+            "duration_ms": 0,
+            "reason": "TEST_COMMAND 未设置",
+        }
+
+    detection = workspace_info.get("detection_status", "未启用")
+    if detection == "未启用":
+        return {
+            "enabled": False,
+            "command_name": test_command,
+            "execution_status": "未启用",
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "",
+            "cwd": "",
+            "duration_ms": 0,
+            "reason": "PROJECT_ROOT 未识别，真实测试命令未启用",
+        }
+    if detection == "已阻止":
+        return {
+            "enabled": False,
+            "command_name": test_command,
+            "execution_status": "已阻止",
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "",
+            "cwd": "",
+            "duration_ms": 0,
+            "reason": "PROJECT_ROOT 被阻止，禁止执行真实测试命令",
+        }
+    if detection == "无效":
+        return {
+            "enabled": False,
+            "command_name": test_command,
+            "execution_status": "无效",
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "",
+            "cwd": "",
+            "duration_ms": 0,
+            "reason": "PROJECT_ROOT 无效，禁止执行真实测试命令",
+        }
+
+    allowed, _reason = is_allowed_test_command(test_command)
+    if not allowed:
+        return {
+            "enabled": False,
+            "command_name": test_command,
+            "execution_status": "已阻止",
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "",
+            "cwd": "",
+            "duration_ms": 0,
+            "reason": "TEST_COMMAND 不在白名单内",
+        }
+
+    project_root = Path(workspace_info.get("project_root", "")).resolve()
+
+    if test_command == "check_app_html":
+        target = project_root / "app.html"
+        if target.exists() and target.is_file():
+            return {
+                "enabled": True,
+                "command_name": "check_app_html",
+                "execution_status": "通过",
+                "exit_code": 0,
+                "stdout": "app.html exists",
+                "stderr": "",
+                "cwd": str(project_root),
+                "duration_ms": 0,
+                "reason": "app.html 存在",
+            }
+        return {
+            "enabled": True,
+            "command_name": "check_app_html",
+            "execution_status": "未通过",
+            "exit_code": 1,
+            "stdout": "",
+            "stderr": "app.html not found",
+            "cwd": str(project_root),
+            "duration_ms": 0,
+            "reason": "app.html 缺失",
+        }
+
+    cmd_info = build_test_command_args(test_command, project_root)
+    executable, _, _ = cmd_info["args"][0], None, None
+    program = cmd_info["args"][0]
+    args = cmd_info["args"][1:]
+    start = datetime.now()
+    try:
+        proc = subprocess.run(
+            [program] + args,
+            shell=False,
+            cwd=cmd_info["cwd"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            encoding="utf-8",
+            errors="replace",
+        )
+        duration_ms = int((datetime.now() - start).total_seconds() * 1000)
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        if len(stdout) > 3000:
+            stdout = stdout[:3000] + "...(truncated)"
+        if len(stderr) > 3000:
+            stderr = stderr[:3000] + "...(truncated)"
+        if proc.returncode == 0:
+            return {
+                "enabled": True,
+                "command_name": test_command,
+                "execution_status": "通过",
+                "exit_code": proc.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "cwd": cmd_info["cwd"],
+                "duration_ms": duration_ms,
+                "reason": "命令执行成功",
+            }
+        return {
+            "enabled": True,
+            "command_name": test_command,
+            "execution_status": "未通过",
+            "exit_code": proc.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "cwd": cmd_info["cwd"],
+            "duration_ms": duration_ms,
+            "reason": f"命令退出码 {proc.returncode}",
+        }
+    except subprocess.TimeoutExpired:
+        duration_ms = int((datetime.now() - start).total_seconds() * 1000)
+        return {
+            "enabled": True,
+            "command_name": test_command,
+            "execution_status": "超时",
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "",
+            "cwd": cmd_info["cwd"],
+            "duration_ms": duration_ms,
+            "reason": "测试命令执行超时",
+        }
+    except Exception as e:
+        duration_ms = int((datetime.now() - start).total_seconds() * 1000)
+        return {
+            "enabled": True,
+            "command_name": test_command,
+            "execution_status": "失败",
+            "exit_code": -1,
+            "stdout": "",
+            "stderr": "",
+            "cwd": cmd_info["cwd"],
+            "duration_ms": duration_ms,
+            "reason": str(e),
+        }
+
+
+def build_skipped_real_test_command_result(reason: str) -> dict:
+    """B-10: Skipped result when Reviewer fails or error path."""
+    return {
+        "enabled": False,
+        "command_name": "",
+        "execution_status": "跳过",
+        "exit_code": -1,
+        "stdout": "",
+        "stderr": "",
+        "cwd": "",
+        "duration_ms": 0,
+        "reason": reason,
+    }
+
+
 def create_run_dir(project_id: str = "") -> Path:
     if project_id and is_valid_project_id(project_id):
         runs_dir = ROOT / "outputs" / "projects" / project_id / "runs"
@@ -1708,6 +1964,7 @@ def run_tester(
     coder_result: str,
     reviewer_result: str,
     reviewer_structured_result: dict,
+    real_test_command_result: dict,
 ) -> str:
     user_prompt = f"""
 下面是用户原始任务：
@@ -1775,7 +2032,27 @@ Real Change Assessment:
 Revision Instructions:
 {reviewer_structured_result.get("revision_instructions", "")}
 
-请你作为 Tester Agent，根据用户任务、PRD、SDD、TDD、Planner 计划、Coder 实现、Reviewer 自由文本结论以及 Reviewer 结构化审查结果，按你的固定输出格式设计最小测试方案并给出测试结论。Tester 必须基于完整上下文验证最终结果，不仅运行测试，还需要确认需求、架构、实现和审查意见的一致性。
+========== REAL TEST COMMAND RESULT ==========
+
+Command Name:
+{real_test_command_result.get("command_name", "")}
+
+Execution Status:
+{real_test_command_result.get("execution_status", "")}
+
+Exit Code:
+{real_test_command_result.get("exit_code", "")}
+
+Stdout:
+{real_test_command_result.get("stdout", "")}
+
+Stderr:
+{real_test_command_result.get("stderr", "")}
+
+Reason:
+{real_test_command_result.get("reason", "")}
+
+请你作为 Tester Agent，根据用户任务、PRD、SDD、TDD、Planner 计划、Coder 实现、Reviewer 自由文本结论、Reviewer 结构化审查结果以及真实测试命令执行结果，按你的固定输出格式设计最小测试方案并给出测试结论。Tester 必须基于完整上下文验证最终结果，不仅运行测试，还需要确认需求、架构、实现和审查意见的一致性。
 """
 
     return call_agent("Tester", user_prompt)
@@ -1857,6 +2134,7 @@ def build_final_report(
     reviewer_diff_context_status: str,
     reviewer_structured_status: str,
     tester_reviewer_structured_context_status: str,
+    tester_real_command_status: str,
 ) -> str:
     sdd_status = "已生成" if sdd_generated else "未生成"
     tdd_status = "已生成" if tdd_generated else "未生成"
@@ -2114,6 +2392,23 @@ def build_final_report(
     else:
         structured_reviewer_section = "\n## Structured Reviewer Result\n\nParse Status: 跳过\n"
 
+    if real_test_command_result:
+        rtc = real_test_command_result
+        rtc_lines = [
+            f"- Enabled: {rtc.get('enabled', False)}",
+            f"- Command Name: {rtc.get('command_name', '')}",
+            f"- Execution Status: {rtc.get('execution_status', '未知')}",
+            f"- Exit Code: {rtc.get('exit_code', '')}",
+            f"- CWD: {rtc.get('cwd', '')}",
+            f"- Duration MS: {rtc.get('duration_ms', '')}",
+            f"- Reason: {rtc.get('reason', '')}",
+            f"- Stdout: {rtc.get('stdout', '') or '(empty)'}",
+            f"- Stderr: {rtc.get('stderr', '') or '(empty)'}",
+        ]
+        real_test_command_section = "\n## Real Test Command\n\n" + "\n".join(rtc_lines) + "\n"
+    else:
+        real_test_command_section = "\n## Real Test Command\n\nExecution Status: 未启用\n"
+
     return f"""# Final Report
 
 ## Workflow Result
@@ -2160,6 +2455,7 @@ def build_final_report(
 - Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
 - Reviewer 结构化审查：{reviewer_structured_status}
 - Tester 接收结构化审查结果：{tester_reviewer_structured_context_status}
+- Tester 真实命令执行：{tester_real_command_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}{revise_section}{delivery_section}{documenter_section}
@@ -2218,6 +2514,7 @@ def build_final_report(
 {minimal_dev_loop_section}
 {reviewer_real_change_review_section}
 {structured_reviewer_section}
+{real_test_command_section}
 """
 
 
@@ -2319,6 +2616,7 @@ def build_run_log(
     reviewer_diff_context_status: str,
     reviewer_structured_status: str,
     tester_reviewer_structured_context_status: str,
+    tester_real_command_status: str,
 ) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2397,6 +2695,7 @@ def build_run_log(
 - Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
 - Reviewer 结构化审查：{reviewer_structured_status}
 - Tester 接收结构化审查结果：{tester_reviewer_structured_context_status}
+- Tester 真实命令执行：{tester_real_command_status}
 - SDD：{sdd_status}
 - TDD：{tdd_status}
 - TASKS：{tasks_status}
@@ -2541,6 +2840,7 @@ def build_summary(
     reviewer_diff_context_status: str,
     reviewer_structured_status: str,
     tester_reviewer_structured_context_status: str,
+    tester_real_command_status: str,
     error: Exception | None = None,
 ) -> str:
     artifact_status = "已生成" if app_html_generated else "未生成"
@@ -2598,6 +2898,7 @@ def build_summary(
 - Reviewer 接收真实变更上下文：{reviewer_diff_context_status}
 - Reviewer 结构化审查：{reviewer_structured_status}
 - Tester 接收结构化审查结果：{tester_reviewer_structured_context_status}
+- Tester 真实命令执行：{tester_real_command_status}
 - Error：{error_text}
 """
 
@@ -2797,12 +3098,26 @@ def main():
         reviewer_context_status = "已接收"
         print()
 
+        # B-10: Skip real test command when Reviewer fails AND TEST_COMMAND is set
+        if TEST_COMMAND:
+            real_test_command_result = build_skipped_real_test_command_result(
+                "Reviewer 未通过，真实测试命令已跳过"
+            )
+            tester_real_command_status_value = real_test_command_result.get("execution_status", "跳过")
+        else:
+            real_test_command_result = {}
         tester_result = "Reviewer 未通过，Tester 已跳过。"
         tester_status = "跳过"
         reviewer_is_passed = review_passed(reviewer_result)
 
         if reviewer_is_passed:
             print("========== Tester 正在分析测试方案 ==========")
+            # B-10: Execute whitelisted real test command before Tester
+            real_test_command_result = execute_real_test_command(
+                TEST_COMMAND, agent_workspace_info
+            )
+            tester_real_command_status_value = real_test_command_result.get("execution_status", "未启用")
+
             current_stage = "Tester"
             tester_result = remove_think(
                 run_tester(
@@ -2814,6 +3129,7 @@ def main():
                     coder_result,
                     reviewer_result,
                     reviewer_structured_result,
+                    real_test_command_result,
                 )
             )
             tester_status = "完成"
@@ -2922,6 +3238,10 @@ DELIVERY RESULT:
             and tdd_generated
             and tasks_generated
         )
+        # B-10: TEST_COMMAND set + failed/timeout/blocked/invalid → workflow 未通过
+        rtc_status = real_test_command_result.get("execution_status", "未启用")
+        if TEST_COMMAND and rtc_status in ("未通过", "超时", "失败", "已阻止", "无效"):
+            workflow_passed = False
         workflow_result = "通过" if workflow_passed else "未通过"
 
         agent_call_wrapper_status = "已启用"
@@ -2938,6 +3258,14 @@ DELIVERY RESULT:
             project_session_info.get("session_status", "未启用"),
             workflow_result,
         )
+
+        # B-10: Initialize real test command status default
+        if TEST_COMMAND:
+            tester_real_command_status_value = "未启用"
+            real_test_command_result = build_skipped_real_test_command_result("TEST_COMMAND 设置但 Reviewer 未通过")
+        else:
+            tester_real_command_status_value = "未启用"
+            real_test_command_result = {}
         project_state_write_result = write_project_state(
             project_session_info,
             run_dir,
@@ -2974,6 +3302,11 @@ DELIVERY RESULT:
             tester_reviewer_structured_context_status_value = "已接收"
         else:
             tester_reviewer_structured_context_status_value = "跳过"
+            if TEST_COMMAND:
+                real_test_command_result = build_skipped_real_test_command_result(
+                    "Reviewer 未通过，真实测试命令已跳过"
+                )
+                tester_real_command_status_value = real_test_command_result.get("execution_status", "跳过")
         minimal_dev_loop_status_value = minimal_dev_loop_acceptance.get("acceptance_status", "未启用")
         failure_injection_status_value = failure_injection_status()
 
@@ -3032,6 +3365,7 @@ DELIVERY RESULT:
             reviewer_diff_context_status,
             reviewer_structured_status_value,
             tester_reviewer_structured_context_status_value,
+            tester_real_command_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -3082,6 +3416,7 @@ DELIVERY RESULT:
             reviewer_diff_context_status,
             reviewer_structured_status_value,
             tester_reviewer_structured_context_status_value,
+            tester_real_command_status_value,
         )
         save_text(reports_dir / "run_log.md", run_log)
 
@@ -3132,6 +3467,7 @@ DELIVERY RESULT:
             reviewer_diff_context_status,
             reviewer_structured_status_value,
             tester_reviewer_structured_context_status_value,
+            tester_real_command_status_value,
         )
         save_text(run_dir / "summary.md", summary)
         update_latest(run_dir, active_project_id)
@@ -3187,6 +3523,11 @@ DELIVERY RESULT:
             project_session_status_value,
             project_state_status_value,
             project_resume_status_value,
+            minimal_dev_loop_status_value,
+            reviewer_diff_context_status,
+            reviewer_structured_status_value,
+            tester_reviewer_structured_context_status_value,
+            tester_real_command_status_value,
         )
         save_text(reports_dir / "final_report.md", final_report)
 
@@ -3217,6 +3558,12 @@ DELIVERY RESULT:
         workflow_result = "未通过"
         save_text(reports_dir / "error_report.md", error_report)
 
+        # B-10: Ensure real_test_command_result is always defined for error report
+        if "real_test_command_result" not in locals() or not real_test_command_result:
+            real_test_command_result = build_skipped_real_test_command_result(
+                "异常路径未执行真实测试命令"
+            )
+
         agent_call_wrapper_status = "已启用"
         model_router_status = "已启用"
         cost_record_status = "已记录"
@@ -3241,6 +3588,11 @@ DELIVERY RESULT:
             error=error,
         )
         project_state_status_value = project_state_write_result.get("write_status", "跳过")
+        # B-10: Default real test command status on error path
+        if real_test_command_result:
+            tester_real_command_status_value = real_test_command_result.get("execution_status", "未启用")
+        else:
+            tester_real_command_status_value = "未启用"
         # B-07: Compute minimal dev loop acceptance (error path)
         minimal_dev_loop_acceptance = build_minimal_dev_loop_acceptance(
             agent_workspace_info,
@@ -3323,6 +3675,7 @@ DELIVERY RESULT:
             reviewer_diff_context_status,
             reviewer_structured_status_value,
             tester_reviewer_structured_context_status_value,
+            tester_real_command_status_value,
             error,
         )
         save_text(run_dir / "summary.md", summary)
@@ -3388,6 +3741,7 @@ DELIVERY RESULT:
                     reviewer_diff_context_status,
                     reviewer_structured_status_value,
                     tester_reviewer_structured_context_status_value,
+                    tester_real_command_status_value,
                 )
                 save_text(reports_dir / "final_report.md", final_report)
         except Exception as fe:
